@@ -1,3 +1,4 @@
+from typing import List, Dict, Any, Optional
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
@@ -11,6 +12,7 @@ def save_ticket_knowledge(
         summary: str,
         issue_type: str = "Task",
         parent_key: str = None,
+        issue_links: List[Dict[str, Any]] = None, # [NEW] รับเป็น List of Dict
         business_logic: str = None,
         technical_spec: str = None,
         test_scenarios: str = None,
@@ -21,10 +23,11 @@ def save_ticket_knowledge(
     Use this tool AFTER you have analyzed and categorized the ticket content.
 
     Args:
-        issue_key: The Jira ticket ID (e.g., PAY-001)
+        issue_key: The Jira ticket ID (e.g., SCRUM-001)
         summary: Brief title of the ticket
         issue_type: Type of issue (Epic, Story, Task, Bug)
         parent_key: ID of the parent ticket (if any)
+        issue_links: should be a list like: [{"relation": "blocks", "target_key": "SCRUM-5"}
         business_logic: Summarized business rules, flows, and requirements
         technical_spec: Summarized technical details (API, DB, Libs)
         test_scenarios: Summarized test cases and acceptance criteria
@@ -38,6 +41,7 @@ def save_ticket_knowledge(
             issue_key=issue_key,
             issue_type=issue_type,
             parent_key=parent_key,
+            issue_links=issue_links,  # [NEW]
             summary=summary,
             business_logic=business_logic,
             technical_spec=technical_spec,

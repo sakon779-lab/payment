@@ -37,6 +37,35 @@ def get_jira_ticket(issue_key: str) -> str:
             data = response.json()
             fields = data.get("fields", {})
 
+            # --- 1. FIX PARENT KEY ---
+            # ต้องเจาะไปเอา key ไม่ใช่เอาทั้ง object
+            parent_info = fields.get("parent", {})
+            parent_key = parent_info.get("key", "None")
+
+            # --- 2. EXTRACT LINKS ---
+            # ดึงความสัมพันธ์ออกมา (Blocks, Relates, etc.)
+            raw_links = fields.get("issuelinks", [])
+            formatted_links = []
+
+            for link in raw_links:
+                link_type = link.get("type", {}).get("name", "Related")
+
+                # Link มี 2 ทาง: Outward (เราไป block เขา) / Inward (เขามา block เรา)
+                if "outwardIssue" in link:
+                    target = link["outwardIssue"]["key"]
+                    direction = "outward"  # e.g. "blocks"
+                    desc = link.get("type", {}).get("outward", link_type)
+                elif "inwardIssue" in link:
+                    target = link["inwardIssue"]["key"]
+                    direction = "inward"  # e.g. "is blocked by"
+                    desc = link.get("type", {}).get("inward", link_type)
+                else:
+                    continue
+
+                formatted_links.append(f"- {desc} {target} ({direction})")
+
+            links_text = "\n".join(formatted_links) if formatted_links else "None"
+
             # จัด format ข้อความให้ AI อ่านง่ายๆ
             description = fields.get('description', 'No Description')
             # (Optional) ถ้า Description เป็น dict แบบ ADF (Jira Cloud) อาจต้องแปลงเพิ่ม แต่เอาแบบดิบไปก่อน
@@ -45,7 +74,13 @@ def get_jira_ticket(issue_key: str) -> str:
             --- TICKET FOUND: {issue_key} ---
             Summary: {fields.get('summary')}
             Status: {fields.get('status', {}).get('name')}
-            Description: {str(description)[:5000]} 
+            
+            Parent Key: {parent_key}
+            
+            Linked Issues:
+            {links_text}
+            
+            Description: {str(fields.get('description', 'No Description'))[:5000]}
             ---------------------------------
             """
     except Exception as e:

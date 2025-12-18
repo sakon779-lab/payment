@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Text, DateTime, func
 from app.db.base_class import Base  # ตรวจสอบว่าใน project คุณใช้ Base จากไหน (ปกติคือ app.db.base)
+from sqlalchemy.dialects.postgresql import JSONB # หรือใช้ Text ถ้าไม่อยาก fix กับ Postgres เกินไป
 
 
 class JiraKnowledge(Base):
@@ -9,6 +10,9 @@ class JiraKnowledge(Base):
     issue_key = Column(String, primary_key=True, index=True, comment="Jira Issue Key (e.g. PAY-001)")
     issue_type = Column(String, nullable=False, index=True, comment="Type: Epic, Story, Task, Bug")
     parent_key = Column(String, nullable=True, index=True, comment="Parent Issue Key (e.g. PAY-001)")
+
+    # [NEW] เก็บความสัมพันธ์ เช่น [{"type": "Blocks", "key": "PAY-005", "direction": "outward"}]
+    issue_links = Column(JSONB, nullable=True, comment="List of related issues (blocks, relates to)")
 
     # --- Content ---
     summary = Column(String, nullable=False)

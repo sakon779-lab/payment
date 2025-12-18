@@ -15,7 +15,7 @@ from graph.tools.jira import get_jira_ticket
 
 # ใช้ Gemini 1.5 Flash (เร็ว, ประหยัด) หรือ 1.5 Pro (ฉลาดกว่า แต่ช้ากว่านิดนึง)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-flash-latest",
+    model="gemini-flash-lite-latest",
     temperature=0,
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
@@ -37,9 +37,11 @@ def agent_node(state: AgentState):
     Your GOAL: Read Jira tickets and save structured summaries to the database.
 
     PROCESS:
-    1. Receive a Jira Ticket Key from the user (e.g., "Sync PAY-001").
+    1. Receive a Jira Ticket Key from the user (e.g., "Sync SCRUM-1").
     2. Use 'get_jira_ticket' to fetch raw content.
     3. ANALYZE the content and categorize it into:
+       - Extract 'Parent Key' strictly from the provided text (if 'None', set to None).
+       - Extract 'Linked Issues' into a list of objects: [{"relation": "blocks", "target_key": "PAY-XXX"}].
        - Business Logic: User flows, business rules, conditions.
        - Technical Spec: API endpoints, database fields, libraries, implementation details.
        - Test Scenarios: Acceptance criteria, test cases.
@@ -47,7 +49,9 @@ def agent_node(state: AgentState):
 
     RULES:
     - Do NOT make things up. If a section is missing, leave it as empty or "N/A".
-    - Always identify 'issue_type' (Epic/Story/Task) and 'parent_key' if available.
+    - For 'parent_key', ensure it is a Jira Key (e.g. SCRUM-1), NOT an ID.
+    - If Link says "blocks SCRUM-2", relation is "blocks", target_key is "SCRUM-2".
+    - Always identify 'issue_type' (Epic/Story/Task).
     - Once saved, confirm to the user with a short message like "✅ Saved [Key] to DB".
     """
 
