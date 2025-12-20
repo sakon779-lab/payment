@@ -51,15 +51,16 @@ def _run_agent_sync(ticket_key: str) -> str:
     """Helper to run the single-ticket agent."""
     try:
         app = build_graph()
-        final_state = app.invoke({
-            "messages": [HumanMessage(content=f"Sync data for {ticket_key}")]
-        })
-        # ดึงข้อความสุดท้ายจาก Agent
+
+        # ✅ เพิ่ม config={"recursion_limit": 50} (จากเดิม 25)
+        final_state = app.invoke(
+            {"messages": [HumanMessage(content=f"Sync data for {ticket_key}")]},
+            config={"recursion_limit": 50}
+        )
         return final_state['messages'][-1].content
     except Exception as e:
         logging.error(f"Agent failed for {ticket_key}: {e}")
         return f"Failed: {e}"
-
 
 def _search_jira_keys(jql: str) -> List[str]:
     """
