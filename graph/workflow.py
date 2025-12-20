@@ -14,6 +14,9 @@ from graph.state import AgentState
 from graph.tools.database import save_ticket_knowledge
 from graph.tools.jira import get_jira_ticket
 
+from langchain_core.messages import AIMessage # เพิ่ม import นี้
+import json
+
 from langchain_core.messages import ToolMessage # อย่าลืม import เพิ่ม
 
 # --- 1. Setup Brain (Ollama) & Tools ---
@@ -39,115 +42,72 @@ llm_with_tools = llm.bind_tools(tools)
 from langchain_core.messages import ToolMessage  # อย่าลืม import เพิ่ม
 
 
-# def agent_node(state: AgentState):
-#     messages = state['messages']
-#
-#     # 🕵️‍♀️ ตรวจสอบว่าในประวัติการคุย มีผลลัพธ์จาก Tool หรือยัง?
-#     # (เช็คว่ามี message ที่เป็น ToolMessage หรือไม่)
-#     has_tool_output = any(isinstance(m, ToolMessage) for m in messages)
-#
-#     if not has_tool_output:
-#         # 🟢 PHASE 1: ยังไม่มีข้อมูล -> บังคับดึงข้อมูล (FETCHER MODE)
-#         system_prompt = """ROLE: Jira Fetcher
-#
-#         Your ONLY Goal: Retrieve the raw ticket data.
-#
-#         INSTRUCTIONS:
-#         1. You have received a ticket key (e.g., SCRUM-16).
-#         2. You MUST call the tool 'get_jira_ticket' immediately.
-#
-#         ⛔ PROHIBITED:
-#         - DO NOT call 'save_ticket_knowledge' yet. You don't have the data.
-#         - DO NOT make up the summary.
-#         """
-#     else:
-#         # 🟠 PHASE 2: SILENT EXECUTION MODE (ห้ามพูด ให้ทำเลย)
-#         system_prompt = """ROLE: SYSTEM_PROCESS (NO HUMAN INTERACTION)
-#
-#         TASK:
-#         You are a non-conversational middleware.
-#         Your ONLY job is to Map Jira Data -> 'save_ticket_knowledge' Tool Call.
-#
-#         DATA MAPPING:
-#         - Extract 'Business Logic', 'Technical Spec' from description (Convert List to String).
-#         - Extract 'Issue Links' (List of JSON).
-#         - Fill ALL fields.
-#
-#         ☠️ FATAL ERROR CONSTRAINTS (YOU MUST OBEY):
-#         1. ❌ DO NOT speak or explain anything.
-#         2. ❌ DO NOT output text like "Here is the tool call".
-#         3. ❌ DO NOT output Markdown blocks (```python or ```json).
-#         4. ❌ DO NOT simulate the code.
-#
-#         ✅ EXPECTED BEHAVIOR:
-#         Trigger the tool function immediately and silently.
-#         """
-#
-#     # ล้าง System Prompt เก่าออก (ถ้ามี) แล้วใส่ตัวใหม่ที่เราเลือกเข้าไปแทน
-#     # (กรองเอาเฉพาะ message ที่ไม่ใช่ SystemMessage แล้วแปะอันใหม่ไว้หน้าสุด)
-#     filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
-#     messages = [SystemMessage(content=system_prompt)] + filtered_messages
-#
-#     # เช็คว่าเราอยู่ใน Phase ไหน?
-#     if not has_tool_output:
-#         # Phase 1: บังคับเรียก get_jira_ticket
-#         response = llm.bind_tools([get_jira_ticket], tool_choice="get_jira_ticket").invoke(messages)
-#     else:
-#         # Phase 2: บังคับเรียก save_ticket_knowledge
-#         response = llm.bind_tools([save_ticket_knowledge], tool_choice="save_ticket_knowledge").invoke(messages)
-#
-#     return {"messages": [response]}
-
 def agent_node(state: AgentState):
     messages = state['messages']
 
-    # เช็คว่ามีข้อมูลจาก Tool (get_jira_ticket) หรือยัง
     tool_output_msg = next((m for m in reversed(messages) if isinstance(m, ToolMessage)), None)
 
+    # 🛑 CHECKPOINT: ถ้า Save สำเร็จแล้ว จบงาน
+    if tool_output_msg and "Successfully saved" in str(tool_output_msg.content):
+        return {"messages": [AIMessage(content="✅ Sync Process Completed Successfully.")]}
+
+    response = None
+
     if not tool_output_msg:
-        # 🟢 PHASE 1: FETCHER (ยังไม่มีของ ไปเอาของมาก่อน)
+        # 🟢 PHASE 1: FETCHER
         print("--- PHASE 1: FETCHING ---")
         system_prompt = """ROLE: Jira Fetcher
-        INSTRUCTIONS: Retrieve the raw ticket data for the user.
-        CMD: Call 'get_jira_ticket' immediately."""
+        INSTRUCTIONS: Retrieve raw ticket data. Call 'get_jira_ticket' immediately."""
 
-        # สร้าง Message ชุดใหม่สำหรับ Phase นี้
-        phase_messages = [SystemMessage(content=system_prompt)] + messages[-1:]  # เอาแค่ User message ล่าสุด
-
+        phase_messages = [SystemMessage(content=system_prompt)] + messages[-1:]
         response = llm.bind_tools([get_jira_ticket], tool_choice="get_jira_ticket").invoke(phase_messages)
 
     else:
-        # 🟠 PHASE 2: CLEAN SLATE SAVER (ล้างสมอง แล้วยัดข้อมูลใส่ปาก)
+        # 🟠 PHASE 2: SAVER
         print("--- PHASE 2: SAVING (CLEAN SLATE) ---")
-
-        # ดึงข้อมูลดิบออกมาจาก ToolMessage
         raw_data_str = tool_output_msg.content
 
-        system_prompt = """ROLE: JSON Data Mapper (Strict Mode)
+        system_prompt = """ROLE: Expert Jira Mapper
 
-        Your ONLY Job: Map the INPUT TEXT into the 'save_ticket_knowledge' tool arguments.
+        TASK: Map INPUT TEXT to 'save_ticket_knowledge' tool.
 
-        INPUT TEXT contains: Summary, Description, Status, etc.
+        RULES:
+        1. issue_key, summary, status, parent_key: Extract exactly.
+        2. business_logic, technical_spec: Summarize from description.
+        3. test_scenarios: Extract test cases.
+        4. issue_links: Extract as List of JSON.
 
-        ⚠️ MAPPING RULES:
-        1. issue_key, summary, status: Extract directly.
-        2. business_logic: Summarize "What needs to be done" and "Rules" from the text. (Default: "General Logic")
-        3. technical_spec: Extract "How to do it" (Libs, APIs, Servers). (Default: "General Spec")
-        4. test_scenarios: Extract test cases. (Default: "N/A")
-
-        ⛔ FATAL ERROR: DO NOT SPEAK. DO NOT SUMMARIZE. DO NOT EXPLAIN.
-        ✅ ACTION: Call the tool 'save_ticket_knowledge' IMMEDIATELY.
+        ⛔ DO NOT CHAT. OUTPUT JSON TOOL CALL ONLY.
         """
 
-        # 🔥 สร้าง Context ใหม่เลย (ไม่เอาประวัติเก่ามาปน)
-        # เราหลอก AI ว่า User เพิ่งส่งข้อมูลดิบมาให้ แล้วสั่งให้ Save เลย
         fresh_messages = [
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"HERE IS THE RAW DATA TO MAP:\n\n{raw_data_str}")
+            HumanMessage(content=f"RAW DATA:\n{raw_data_str}")
         ]
 
-        # บังคับเรียก Tool save_ticket_knowledge เท่านั้น
         response = llm.bind_tools([save_ticket_knowledge], tool_choice="save_ticket_knowledge").invoke(fresh_messages)
+
+    # 🔥🔥🔥 SAFETY NET: แก้ปัญหา AI พ่น JSON เป็น Text 🔥🔥🔥
+    # ถ้า AI ไม่เรียก Tool (tool_calls ว่าง) แต่เนื้อหา (content) ดูเหมือน JSON
+    if not response.tool_calls and response.content.strip().startswith('{'):
+        try:
+            print("⚠️ DETECTED FAKE TOOL CALL (TEXT JSON) - FIXING MANUALLY...")
+            content_str = response.content.strip()
+
+            # แปลง Text เป็น JSON
+            data = json.loads(content_str)
+
+            # ถ้าโครงสร้างตรงกับที่ Llama ชอบพ่นออกมา
+            if "name" in data and "parameters" in data:
+                # ยัดเยียดความเป็น Tool Call ให้มันซะ!
+                response.tool_calls = [{
+                    "name": data["name"],
+                    "args": data["parameters"],
+                    "id": "manual_fix_id"
+                }]
+                response.content = ""  # ลบ Text ออกเพื่อความเนียน
+        except Exception as e:
+            print(f"❌ Failed to parse fake tool call: {e}")
 
     return {"messages": [response]}
 

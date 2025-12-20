@@ -33,6 +33,9 @@ def save_ticket_knowledge(
         test_scenarios: Summarized test cases and acceptance criteria
         status: Current status of the ticket
     """
+    # ในฟังก์ชัน save_ticket_knowledge ก่อนบรรทัด knowledge = JiraKnowledge(...)
+    if parent_key == "None" or parent_key == "":
+        parent_key = None
 
     session: Session = SessionLocal()
     try:
