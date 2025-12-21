@@ -1,12 +1,15 @@
 import os
 from typing import Literal
-import langchain  # ✅ 1. เพิ่ม Import นี้
+import langchain
+import ast
 
 # --- Debug Mode: เปิดเพื่อให้เห็นว่า Llama ส่งอะไรกลับมา (สำคัญมาก) ---
 langchain.debug = True
 
 from langchain_ollama import ChatOllama
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import (
+    SystemMessage, HumanMessage, ToolMessage, AIMessage, BaseMessage # ✅ [เพิ่ม] AIMessage
+)
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 
@@ -27,7 +30,9 @@ llm = ChatOllama(
     temperature=0,
     base_url="http://localhost:11434",
     # ✅✅✅ เพิ่มบรรทัดนี้: ขยายความจำจาก 2k เป็น 8k หรือ 16k ✅✅✅
-    num_ctx=16384
+    num_ctx=20000,
+    # ✅✅✅ เพิ่มบรรทัดนี้: ขยายโควต้าการพูดขาออก (Output Tokens) ✅✅✅
+    num_predict=-1,   # ให้สิทธิ์พูดได้ยาวเหยียด (สูงสุดของ Model)
 )
 
 # รวม Tool ทั้งหมด
@@ -59,7 +64,10 @@ def agent_node(state: AgentState):
         system_prompt = """ROLE: Jira Fetcher
         INSTRUCTIONS: Retrieve raw ticket data. Call 'get_jira_ticket' immediately."""
 
-        phase_messages = [SystemMessage(content=system_prompt)] + messages[-1:]
+        # ตัด System Message เก่าออก
+        filtered_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        phase_messages = [SystemMessage(content=system_prompt)] + filtered_messages[-1:]
+
         response = llm.bind_tools([get_jira_ticket], tool_choice="get_jira_ticket").invoke(phase_messages)
 
     else:
@@ -71,11 +79,17 @@ def agent_node(state: AgentState):
 
         TASK: Map INPUT TEXT to 'save_ticket_knowledge' tool.
 
-        RULES:
-        1. issue_key, summary, status, parent_key: Extract exactly.
-        2. business_logic, technical_spec: Summarize from description.
+        ⚠️ FORMATTING RULES (CRITICAL):
+        1. issue_key, summary, status, parent_key, issue_type: Extract exactly.
+        2. business_logic, technical_spec: 
+           - SUMMARIZE the core rules/flows. (Max 3-4 sentences).
+           - ⛔ IF YOU WRITE CODE/JSON EXAMPLES INSIDE THESE FIELDS:
+             USE SINGLE QUOTES (') FOR INNER TEXT. 
+             DO NOT USE DOUBLE QUOTES (") INSIDE STRINGS.
         3. test_scenarios: Extract test cases.
-        4. issue_links: Extract as List of JSON.
+        4. issue_links: 
+           - Extract as List of JSON objects.
+           - ⛔ IF EMPTY OR NONE: Send [] (Empty List). DO NOT send [{"relation": ""}].
 
         ⛔ DO NOT CHAT. OUTPUT JSON TOOL CALL ONLY.
         """
@@ -87,27 +101,37 @@ def agent_node(state: AgentState):
 
         response = llm.bind_tools([save_ticket_knowledge], tool_choice="save_ticket_knowledge").invoke(fresh_messages)
 
-    # 🔥🔥🔥 SAFETY NET: แก้ปัญหา AI พ่น JSON เป็น Text 🔥🔥🔥
-    # ถ้า AI ไม่เรียก Tool (tool_calls ว่าง) แต่เนื้อหา (content) ดูเหมือน JSON
-    if not response.tool_calls and response.content.strip().startswith('{'):
+    # 🔥🔥🔥 SAFETY NET V2: The Ultimate Parser (AST + JSON) 🔥🔥🔥
+    # ถ้า AI ไม่เรียก Tool แต่พ่น JSON ออกมาเป็น Text
+    if not getattr(response, 'tool_calls', None) and response.content.strip().startswith('{'):
+        print("⚠️ DETECTED FAKE TOOL CALL (TEXT JSON) - ATTEMPTING REPAIR...")
+        content_str = response.content.strip()
+        data = None
+
+        # วิธีที่ 1: ลองแปลงแบบ JSON ปกติ (ผ่อนปรน)
         try:
-            print("⚠️ DETECTED FAKE TOOL CALL (TEXT JSON) - FIXING MANUALLY...")
-            content_str = response.content.strip()
+            data = json.loads(content_str, strict=False)
+        except:
+            pass
 
-            # แปลง Text เป็น JSON
-            data = json.loads(content_str)
+        # วิธีที่ 2: ลองแปลงแบบ Python Dictionary (เทพกว่า รับ Quote ซ้อนได้)
+        if data is None:
+            try:
+                # แปลง keyword json เป็น python
+                py_str = content_str.replace("true", "True").replace("false", "False").replace("null", "None")
+                data = ast.literal_eval(py_str)
+                print("✅ REPAIRED using AST (Python Parser)!")
+            except Exception as e:
+                print(f"❌ Failed to parse via AST: {e}")
 
-            # ถ้าโครงสร้างตรงกับที่ Llama ชอบพ่นออกมา
-            if "name" in data and "parameters" in data:
-                # ยัดเยียดความเป็น Tool Call ให้มันซะ!
-                response.tool_calls = [{
-                    "name": data["name"],
-                    "args": data["parameters"],
-                    "id": "manual_fix_id"
-                }]
-                response.content = ""  # ลบ Text ออกเพื่อความเนียน
-        except Exception as e:
-            print(f"❌ Failed to parse fake tool call: {e}")
+        # ยัดเยียดความเป็น Tool Call
+        if data and "name" in data and "parameters" in data:
+            response.tool_calls = [{
+                "name": data["name"],
+                "args": data["parameters"],
+                "id": "manual_fix_id"
+            }]
+            response.content = ""
 
     return {"messages": [response]}
 
@@ -151,15 +175,14 @@ if __name__ == "__main__":
     dotenv.load_dotenv()
 
     app = build_graph()
-    target_ticket = "SCRUM-16"
+    target_ticket = "SCRUM-5"  # เปลี่ยนเป็น Ticket ที่ต้องการเทส
 
     print(f"📚 Librarian Agent (Ollama): Syncing {target_ticket}...\n")
 
     try:
-        # ✅ เพิ่ม recursion_limit เพื่อป้องกันการตัดจบเร็วเกินไป
         final_state = app.invoke(
             {"messages": [HumanMessage(content=f"Sync data for {target_ticket}")]},
-            config={"recursion_limit": 50}
+            config={"recursion_limit": 20}
         )
 
         print("\n--------------------------------")
@@ -167,7 +190,7 @@ if __name__ == "__main__":
         print("--------------------------------")
 
         for i, msg in enumerate(final_state['messages']):
-            # ใช้ getattr เพื่อความปลอดภัย (ถ้าไม่มี attribute จะได้ค่าว่างแทน ไม่ Error)
+            # ✅ ใช้ getattr เพื่อความปลอดภัย (HumanMessage ไม่มี tool_calls ก็จะไม่ Error)
             tool_calls = getattr(msg, 'tool_calls', [])
             content = getattr(msg, 'content', "")
 
@@ -175,24 +198,27 @@ if __name__ == "__main__":
             if tool_calls:
                 for tool in tool_calls:
                     print(f"[{i}] 🔧 AI Called Tool: {tool['name']}")
-
-                    # ✅✅✅ เพิ่มบรรทัดนี้: เพื่อดูข้อมูลที่มันส่งไป Save ✅✅✅
                     import json
 
-                    print(f"     📦 Payload: {json.dumps(tool['args'], indent=2, ensure_ascii=False)}")
+                    try:
+                        print(f"     📦 Payload: {json.dumps(tool['args'], indent=2, ensure_ascii=False)}")
+                    except:
+                        print(f"     📦 Payload: {tool['args']}")
 
             # 2. กรณีเป็นผลลัพธ์จาก Tool (ToolMessage)
-            elif "ToolMessage" in str(type(msg)):
-                # ตัดข้อความให้สั้นลงเพื่อให้อ่านง่าย
+            elif isinstance(msg, ToolMessage):
                 output_preview = str(content)[:200].replace('\n', ' ')
                 print(f"[{i}] 📤 Tool Output: {output_preview}...")
 
             # 3. กรณีเป็นข้อความสนทนา (Human หรือ AI บ่น)
             elif content:
-                sender = "👤 User" if "HumanMessage" in str(type(msg)) else "🤖 AI"
+                sender = "👤 User" if isinstance(msg, HumanMessage) else "🤖 AI"
                 print(f"[{i}] {sender}: {content}")
 
         print("\n--------------------------------")
 
     except Exception as e:
+        import traceback
+
+        traceback.print_exc()
         print(f"\n❌ Error: {e}")

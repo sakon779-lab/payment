@@ -25,7 +25,7 @@ def save_ticket_knowledge(
     Args:
         issue_key: The Jira ticket ID (e.g., SCRUM-001)
         summary: Brief title of the ticket
-        issue_type: Type of issue (Epic, Story, Task, Bug)
+        issue_type: Type of issue (Epic, Story, Task, Subtask, Bug)
         parent_key: ID of the parent ticket (if any)
         issue_links: should be a list like: [{"relation": "blocks", "target_key": "SCRUM-5"}
         business_logic: Summarized business rules, flows, and requirements

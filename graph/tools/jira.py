@@ -37,6 +37,11 @@ def get_jira_ticket(issue_key: str) -> str:
             data = response.json()
             fields = data.get("fields", {})
 
+            # --- [NEW] 0. EXTRACT ISSUE TYPE ---
+            # ดึงประเภทของ Ticket (Story, Task, Sub-task, Bug)
+            issue_type_info = fields.get("issuetype", {})
+            issue_type_name = issue_type_info.get("name", "Unknown")
+
             # --- 1. FIX PARENT KEY ---
             # ต้องเจาะไปเอา key ไม่ใช่เอาทั้ง object
             parent_info = fields.get("parent", {})
@@ -73,6 +78,7 @@ def get_jira_ticket(issue_key: str) -> str:
             return f"""
             --- TICKET FOUND: {issue_key} ---
             Summary: {fields.get('summary')}
+            Issue Type: {issue_type_name}
             Status: {fields.get('status', {}).get('name')}
             
             Parent Key: {parent_key}
