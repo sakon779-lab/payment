@@ -2,6 +2,7 @@ import os
 from typing import Literal
 import langchain
 import ast
+import logging
 
 # --- Debug Mode: เปิดเพื่อให้เห็นว่า Llama ส่งอะไรกลับมา (สำคัญมาก) ---
 langchain.debug = True
@@ -60,7 +61,7 @@ def agent_node(state: AgentState):
 
     if not tool_output_msg:
         # 🟢 PHASE 1: FETCHER
-        print("--- PHASE 1: FETCHING ---")
+        logging.info("--- PHASE 1: FETCHING ---")
         system_prompt = """ROLE: Jira Fetcher
         INSTRUCTIONS: Retrieve raw ticket data. Call 'get_jira_ticket' immediately."""
 
@@ -72,27 +73,36 @@ def agent_node(state: AgentState):
 
     else:
         # 🟠 PHASE 2: SAVER
-        print("--- PHASE 2: SAVING (CLEAN SLATE) ---")
+        logging.info("--- PHASE 2: SAVING (CLEAN SLATE) ---")
         raw_data_str = tool_output_msg.content
 
-        system_prompt = """ROLE: Expert Jira Mapper
+        system_prompt = """ROLE: Senior Tech Lead & Summarizer
 
-        TASK: Map INPUT TEXT to 'save_ticket_knowledge' tool.
+                TASK: Extract critical info from Jira text to 'save_ticket_knowledge'.
 
-        ⚠️ FORMATTING RULES (CRITICAL):
-        1. issue_key, summary, status, parent_key, issue_type: Extract exactly.
-        2. business_logic, technical_spec: 
-           - SUMMARIZE the core rules/flows. (Max 3-4 sentences).
-           - ⛔ IF YOU WRITE CODE/JSON EXAMPLES INSIDE THESE FIELDS:
-             USE SINGLE QUOTES (') FOR INNER TEXT. 
-             DO NOT USE DOUBLE QUOTES (") INSIDE STRINGS.
-        3. test_scenarios: Extract test cases.
-        4. issue_links: 
-           - Extract as List of JSON objects.
-           - ⛔ IF EMPTY OR NONE: Send [] (Empty List). DO NOT send [{"relation": ""}].
+                ⚠️ STRICT SUMMARIZATION RULES (SAVE TOKENS!):
 
-        ⛔ DO NOT CHAT. OUTPUT JSON TOOL CALL ONLY.
-        """
+                1. issue_key, summary, status, parent_key, issue_type: Extract exactly.
+
+                2. business_logic: 
+                   - Summarize the 'Goal' and 'Key Rules' in 3-5 bullet points.
+                   - ⛔ DO NOT copy-paste the whole description.
+
+                3. technical_spec: 
+                   - List APIs (Method/Path only), DB Tables, and Libraries.
+                   - ⛔ IF JSON IS PRESENT: Write "Payload: {json_structure_summary}" (Do not copy full JSON).
+                   - ⛔ USE SINGLE QUOTES inside strings to avoid JSON errors.
+
+                4. test_scenarios: 
+                   - Create 3-5 high-level test case titles (e.g., "Verify that...").
+                   - ⛔ DO NOT repeat Business Logic here.
+
+                5. issue_links: 
+                   - Extract valid links only. 
+                   - ⛔ IF EMPTY: Send [] (Empty List).
+
+                ⛔ OUTPUT RAW JSON TOOL CALL ONLY. NO CHAT.
+                """
 
         fresh_messages = [
             SystemMessage(content=system_prompt),
@@ -175,7 +185,7 @@ if __name__ == "__main__":
     dotenv.load_dotenv()
 
     app = build_graph()
-    target_ticket = "SCRUM-5"  # เปลี่ยนเป็น Ticket ที่ต้องการเทส
+    target_ticket = "SCRUM-6"  # เปลี่ยนเป็น Ticket ที่ต้องการเทส
 
     print(f"📚 Librarian Agent (Ollama): Syncing {target_ticket}...\n")
 

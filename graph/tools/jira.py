@@ -4,6 +4,47 @@ from langchain_core.tools import tool
 
 
 @tool
+def search_jira_issues(jql_query: str = "project = SCRUM ORDER BY created DESC") -> str:
+    """
+    Searches for Jira tickets using JQL and returns a list of Issue Keys.
+    Args:
+        jql_query: JQL string (default: all issues in project, newest first)
+    """
+    jira_url = os.getenv("JIRA_URL")
+    email = os.getenv("JIRA_EMAIL")
+    token = os.getenv("JIRA_API_TOKEN")
+
+    if not all([jira_url, email, token]):
+        return "Error: Jira credentials missing."
+
+    auth = (email, token)
+    headers = {"Accept": "application/json"}
+
+    # maxResults=50 (ดึงทีละ 50 ใบพอก่อน กันระบบสำลัก)
+    url = f"{jira_url}/rest/api/3/search?jql={jql_query}&fields=key&maxResults=50"
+
+    try:
+        with httpx.Client() as client:
+            response = client.get(url, auth=auth, headers=headers)
+            if response.status_code != 200:
+                return f"Error searching issues: {response.text}"
+
+            data = response.json()
+            issues = data.get("issues", [])
+
+            # ดึงเฉพาะ Key ออกมาเป็น List
+            # เช่น "Found 3 issues: SCRUM-16, SCRUM-5, SCRUM-4"
+            keys = [i["key"] for i in issues]
+
+            if not keys:
+                return "No issues found."
+
+            return f"Found {len(keys)} issues: {', '.join(keys)}"
+
+    except Exception as e:
+        return f"Exception searching issues: {str(e)}"
+
+@tool
 def get_jira_ticket(issue_key: str) -> str:
     """
     Fetches details of a Jira ticket (Summary, Status, Description) by its Key.

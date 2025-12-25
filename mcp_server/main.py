@@ -2,14 +2,15 @@ import sys
 import os
 import httpx
 import logging
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 # --- 1. SETUP LOGGING ---
+# สำคัญมาก: ห้ามใช้ print() ใน MCP Server ให้ใช้ logging แทน
 log_file_path = r"D:\Project\PaymentBlockChain\mcp_debug.log"
 logging.basicConfig(
     filename=log_file_path,
@@ -51,8 +52,7 @@ def _run_agent_sync(ticket_key: str) -> str:
     """Helper to run the single-ticket agent."""
     try:
         app = build_graph()
-
-        # ✅ เพิ่ม config={"recursion_limit": 50} (จากเดิม 25)
+        # config limit เพื่อป้องกัน infinite loop
         final_state = app.invoke(
             {"messages": [HumanMessage(content=f"Sync data for {ticket_key}")]},
             config={"recursion_limit": 50}
@@ -62,36 +62,31 @@ def _run_agent_sync(ticket_key: str) -> str:
         logging.error(f"Agent failed for {ticket_key}: {e}")
         return f"Failed: {e}"
 
-def _search_jira_keys(jql: str) -> List[str]:
-    """
-    Helper to search Jira using the NEW /rest/api/3/search/jql endpoint.
-    Ref: https://developer.atlassian.com/changelog/#CHANGE-2046
-    Note: Uses 'nextPageToken' for pagination instead of 'startAt'.
-    """
+
+def _search_jira_keys(jql: str, max_fetch: int = 50) -> List[str]:
+    """Helper to search Jira tickets via API."""
     if not JIRA_URL or not JIRA_API_TOKEN:
         raise ValueError("Missing Jira Config")
 
-    # ✅ ใช้ Endpoint ใหม่ที่ถูกต้อง
     url = f"{JIRA_URL}/rest/api/3/search/jql"
-
     auth = (JIRA_EMAIL, JIRA_API_TOKEN)
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
 
     found_keys = []
-    next_token = None  # ตัวแปรสำหรับเก็บ Token หน้าถัดไป
-    max_results = 50
+    next_token = None
 
-    logging.info(f"🔎 Executing JQL (v3 Enhanced): {jql}")
+    logging.info(f"🔎 Executing JQL: {jql}")
 
     while True:
-        # ✅ Payload แบบใหม่
+        if len(found_keys) >= max_fetch:
+            break
+
         payload = {
             "jql": jql,
             "fields": ["key"],
-            "maxResults": max_results
+            "maxResults": 50
         }
 
-        # ถ้ามี Token (หน้า 2 เป็นต้นไป) ให้ใส่เข้าไปใน payload
         if next_token:
             payload["nextPageToken"] = next_token
 
@@ -112,10 +107,7 @@ def _search_jira_keys(jql: str) -> List[str]:
             for issue in issues:
                 found_keys.append(issue["key"])
 
-            # ✅ อัปเดต Token สำหรับรอบถัดไป
             next_token = data.get("nextPageToken")
-
-            # ถ้าไม่มี Token ส่งกลับมา แสดงว่าหมดข้อมูลแล้ว
             if not next_token:
                 break
 
@@ -123,12 +115,11 @@ def _search_jira_keys(jql: str) -> List[str]:
 
 
 def _get_last_sync_time() -> str:
-    """Find the latest sync timestamp from our DB."""
+    """Find the latest sync timestamp from DB."""
     session: Session = SessionLocal()
     try:
         last_time = session.query(func.max(JiraKnowledge.last_synced_at)).scalar()
         if last_time:
-            # ใช้ Format ที่ Jira ชอบ: 'yyyy-MM-dd HH:mm'
             return last_time.strftime("%Y-%m-%d %H:%M")
     except Exception as e:
         logging.error(f"DB Query Error: {e}")
@@ -141,10 +132,7 @@ def _get_last_sync_time() -> str:
 
 @mcp.tool()
 async def preview_jira_ticket(issue_key: str) -> str:
-    """
-    PREVIEW or READ-ONLY details of a Jira ticket.
-    Expected Output: Text summary only.
-    """
+    """PREVIEW details of a Jira ticket (Live Data)."""
     logging.info(f"Tool called: preview_jira_ticket for {issue_key}")
 
     if not JIRA_URL or not JIRA_API_TOKEN:
@@ -165,17 +153,14 @@ async def preview_jira_ticket(issue_key: str) -> str:
             data = response.json()
             fields = data.get("fields", {})
             summary = fields.get("summary", "No Summary")
-            description = fields.get("description", "No Description")
             status = fields.get("status", {}).get("name", "Unknown")
-
-            # แปลง Description (ซึ่งอาจเป็น Dict ใน v3) ให้เป็น string ง่ายๆ
-            desc_text = str(description)[:1000]
+            description = str(fields.get("description", "No Description"))[:1000]
 
             return f"""
-            --- JIRA TICKET: {issue_key} ---
+            --- JIRA TICKET (LIVE): {issue_key} ---
             Summary: {summary}
             Status: {status}
-            Description: {desc_text}...
+            Description: {description}...
             --------------------------------
             """
         except Exception as e:
@@ -183,64 +168,122 @@ async def preview_jira_ticket(issue_key: str) -> str:
 
 
 @mcp.tool()
-def save_jira_to_db(ticket_key: str) -> str:
-    """ACTIONS: Fetch and SAVE/INSERT Jira ticket into Database."""
-    logging.info(f"Tool called: save_jira_to_db for {ticket_key}")
-    return _run_agent_sync(ticket_key)
-
-
-@mcp.tool()
 def sync_single_ticket(ticket_key: str) -> str:
     """ACTIONS: Sync ONE specific Jira ticket to Database."""
-    logging.info(f"Tool called: sync_single_ticket for {ticket_key}")
     return _run_agent_sync(ticket_key)
 
 
 @mcp.tool()
-def sync_project_batch(project_key: str, incremental: bool = True) -> str:
+def sync_project_batch(project_key: str = "SCRUM", incremental: bool = True, limit: int = 5) -> str:
     """
-    ACTIONS: Batch Sync multiple tickets from a project.
+    ACTIONS: Batch Sync tickets.
     Args:
-        project_key: The project Key (e.g. "SCRUM")
-        incremental: True = Sync only updated tickets. False = Force full sync.
+        limit: Max tickets to process (Default 5 to prevent timeout).
     """
-    logging.info(f"Tool called: sync_project_batch (Project: {project_key}, Inc: {incremental})")
+    logging.info(f"Tool called: sync_project_batch (Limit: {limit})")
 
     jql = ""
     if incremental:
         last_sync = _get_last_sync_time()
         if last_sync:
-            logging.info(f"Detected last sync time: {last_sync}")
-            # ใช้ updated >= เพื่อกันพลาด
-            jql = f"project = {project_key} AND updated >= '{last_sync}'"
+            jql = f"project = {project_key} AND updated >= '{last_sync}' ORDER BY updated ASC"
         else:
-            logging.info("No previous sync found. Full sync.")
-            jql = f"project = {project_key}"
+            jql = f"project = {project_key} ORDER BY created DESC"
     else:
-        jql = f"project = {project_key}"
+        jql = f"project = {project_key} ORDER BY created DESC"
 
-    # Search Jira
     try:
-        keys_to_sync = _search_jira_keys(jql)
+        all_keys = _search_jira_keys(jql, max_fetch=limit)
     except Exception as e:
         return f"❌ Failed to search Jira: {e}"
 
-    if not keys_to_sync:
-        return f"✅ No updates found for project {project_key}."
+    if not all_keys:
+        return f"✅ No tickets found matching criteria."
 
-    # Loop Sync
-    results = [f"🔄 Syncing {len(keys_to_sync)} tickets..."]
+    target_keys = all_keys[:limit]
+    results = [f"🔄 Batch Sync Started ({len(target_keys)} tickets)..."]
 
-    for i, key in enumerate(keys_to_sync, 1):
-        logging.info(f"[{i}/{len(keys_to_sync)}] Processing {key}...")
-        status = _run_agent_sync(key)
+    for i, key in enumerate(target_keys, 1):
+        logging.info(f"[{i}/{len(target_keys)}] Processing {key}...")
+        try:
+            status = _run_agent_sync(key)
+            if "Success" in status or "Saved" in status:
+                results.append(f"✅ {key}: Success")
+            else:
+                results.append(f"⚠️ {key}: Check log")
+        except Exception as e:
+            results.append(f"❌ {key}: Failed ({e})")
 
-        # Log ผลสั้นๆ
-        short_status = "✅ Saved" if "Saved" in status or "Success" in status else "⚠️ Check Log"
-        results.append(f"{i}. {key}: {short_status}")
+    return "\n".join(results)
 
-    summary = "\n".join(results)
-    return f"Batch Process Completed:\n{summary}"
+
+@mcp.tool()
+def search_knowledge_base(query: str) -> str:
+    """
+    SEARCH local database for saved Jira knowledge (Logic, Specs).
+    """
+    logging.info(f"🔎 Searching DB for: '{query}'")
+    session: Session = SessionLocal()
+    try:
+        results = session.query(JiraKnowledge).filter(
+            or_(
+                JiraKnowledge.issue_key.ilike(f"%{query}%"),
+                JiraKnowledge.summary.ilike(f"%{query}%"),
+                JiraKnowledge.business_logic.ilike(f"%{query}%"),
+                JiraKnowledge.technical_spec.ilike(f"%{query}%"),
+                JiraKnowledge.test_scenarios.ilike(f"%{query}%")
+            )
+        ).limit(5).all()
+
+        if not results:
+            return "❌ No relevant information found in Local Database."
+
+        output = [f"Found {len(results)} records matching '{query}':\n"]
+        for r in results:
+            output.append(
+                f"=== [{r.issue_key}] {r.summary} ===\nStatus: {r.status}\nLogic: {r.business_logic[:200]}...\n")
+
+        return "\n".join(output)
+    except Exception as e:
+        return f"DB Error: {str(e)}"
+    finally:
+        session.close()
+
+
+@mcp.tool()
+def get_project_dashboard(project_key: str = "SCRUM", limit: int = 50) -> str:
+    """
+    GET DASHBOARD: High-level summary of active tickets.
+    """
+    logging.info(f"📊 Generating Dashboard for {project_key}...")
+    session: Session = SessionLocal()
+    try:
+        results = session.query(
+            JiraKnowledge.issue_key,
+            JiraKnowledge.summary,
+            JiraKnowledge.status,
+            JiraKnowledge.issue_type
+        ).filter(
+            JiraKnowledge.issue_key.like(f"{project_key}-%")
+        ).order_by(JiraKnowledge.issue_key.desc()).limit(limit).all()
+
+        if not results:
+            return f"❌ No data found for {project_key}."
+
+        report = [f"📊 DASHBOARD: {project_key} ({len(results)} tickets)\n"]
+        report.append(f"{'KEY':<10} | {'STATUS':<12} | {'SUMMARY'}")
+        report.append("-" * 60)
+
+        for r in results:
+            summ = (r.summary[:40] + '..') if len(r.summary) > 40 else r.summary
+            status = r.status or "Unknown"
+            report.append(f"{r.issue_key:<10} | {status:<12} | {summ}")
+
+        return "\n".join(report)
+    except Exception as e:
+        return f"Dashboard Error: {str(e)}"
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":
