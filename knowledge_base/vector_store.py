@@ -5,8 +5,12 @@ from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
 from langchain_core.documents import Document
 
+# 👇 FIX: ใช้ตำแหน่งของไฟล์นี้ เป็นตัวตั้งต้น แล้วถอยหลังมา 1 step เพื่อหา Project Root
+CURRENT_FILE_PATH = os.path.abspath(__file__) # D:\Project\PaymentBlockChain\knowledge_base\vector_store.py
+BASE_DIR = os.path.dirname(os.path.dirname(CURRENT_FILE_PATH)) # D:\Project\PaymentBlockChain
+
 # กำหนดที่เก็บ Vector DB (จะเป็น Folder ชื่อ 'chroma_db' ในโปรเจกต์)
-PERSIST_DIRECTORY = os.path.join(os.getcwd(), "chroma_db")
+PERSIST_DIRECTORY = os.path.join(BASE_DIR, "chroma_db")
 
 # ตั้งค่า Embedding Model (ใช้ Ollama: nomic-embed-text)
 embeddings = OllamaEmbeddings(
