@@ -2,12 +2,14 @@ import sys
 import os
 import httpx
 import logging
-from typing import List, Optional
-from datetime import datetime
+from typing import List
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+# 👇 เพิ่ม 3 บรรทัดนี้ เพื่อให้ Python มองเห็นโฟลเดอร์ Project หลัก
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from knowledge_base.vector_store import add_ticket_to_vector, search_vector_db
 
 # --- 1. SETUP LOGGING ---
 # สำคัญมาก: ห้ามใช้ print() ใน MCP Server ให้ใช้ logging แทน
@@ -31,8 +33,8 @@ try:
 
     from langchain_core.messages import HumanMessage
     from graph.workflow import build_graph
-    from app.db.session import SessionLocal
-    from app.models.knowledge import JiraKnowledge
+    from knowledge_base.database import SessionLocal
+    from knowledge_base.models import JiraKnowledge
 
 except Exception as e:
     logging.critical(f"❌ CRITICAL ERROR during startup: {str(e)}", exc_info=True)
@@ -285,6 +287,47 @@ def get_project_dashboard(project_key: str = "SCRUM", limit: int = 50) -> str:
     finally:
         session.close()
 
+
+@mcp.tool()
+def reindex_knowledge_base() -> str:
+    """
+    ADMIN TOOL: Convert all SQL Knowledge into Vector Embeddings.
+    Run this once after installing Vector Search or when data feels out of sync.
+    """
+    session: Session = SessionLocal()
+    try:
+        # ดึงข้อมูลทั้งหมดจาก SQL
+        tickets = session.query(JiraKnowledge).all()
+        count = 0
+
+        for t in tickets:
+            # เตรียมข้อมูลส่งไปทำ Vector
+            data = {
+                "key": t.issue_key,
+                "summary": t.summary,
+                "status": t.status,
+                "logic": t.business_logic,
+                "spec": t.technical_spec
+            }
+            add_ticket_to_vector(data)
+            count += 1
+
+        return f"✅ Successfully Indexed {count} tickets into Vector Database."
+    except Exception as e:
+        return f"Indexing Failed: {e}"
+    finally:
+        session.close()
+
+
+@mcp.tool()
+def ask_project_guru(question: str) -> str:
+    """
+    SMART SEARCH: Ask questions about the project using natural language.
+    Use this when you want to understand CONCEPTS, LOGIC, or RELATIONSHIPS.
+    Example: "How does the payment calculation work?", "Do we have any AI tasks?"
+    """
+    # ใช้ Vector Search แทน SQL Search ธรรมดา
+    return search_vector_db(question, k=4)
 
 if __name__ == "__main__":
     logging.info("Run command executing...")

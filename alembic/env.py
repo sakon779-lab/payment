@@ -8,10 +8,9 @@ from alembic import context
 # Import เข้ามา (เพิ่มช่วงบนของไฟล์)
 import sys
 import os
-sys.path.append(os.getcwd()) # ให้ Python มองเห็น folder app
+sys.path.append(os.getcwd()) # ให้ Python มองเห็น folder payment_core
 
-from app.db.base_class import Base
-from app.models.knowledge import JiraKnowledge # Import ตัวโมเดลที่เราสร้าง
+from knowledge_base.database import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

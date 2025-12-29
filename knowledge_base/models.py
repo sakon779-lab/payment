@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Text, DateTime, func
-from app.db.base_class import Base  # ตรวจสอบว่าใน project คุณใช้ Base จากไหน (ปกติคือ app.db.base)
+from knowledge_base.database import Base  # ตรวจสอบว่าใน project คุณใช้ Base จากไหน (ปกติคือ payment_core.db.base)
 from sqlalchemy.dialects.postgresql import JSONB # หรือใช้ Text ถ้าไม่อยาก fix กับ Postgres เกินไป
 
 

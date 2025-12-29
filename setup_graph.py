@@ -54,10 +54,10 @@ def build_graph():
 if __name__ == "__main__":
     from langchain_core.messages import HumanMessage
 
-    app = build_graph()
+    payment_core = build_graph()
     print("🚀 Running Simple Graph Test...")
 
-    result = app.invoke({
+    result = payment_core.invoke({
         "messages": [HumanMessage(content="Hello LangGraph!")]
     })
 

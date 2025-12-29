@@ -48,29 +48,29 @@ alembic>=1.13.0
 pydantic-settings>=2.1.0
 python-dotenv>=1.0.0
 """,
-    "app/__init__.py": "",
-    "app/main.py": """from fastapi import FastAPI
+    "payment_core/__init__.py": "",
+    "payment_core/main.py": """from fastapi import FastAPI
 from contextlib import asynccontextmanager
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(payment_core: FastAPI):
     print("🚀 System Starting... Connecting to DB")
     # In the future: await db.connect()
     yield
     print("🛑 System Shutting down...")
 
-app = FastAPI(
+payment_core = FastAPI(
     title="Stable Coin Payment Gateway PoC",
     description="PoC system for generating code via LangGraph/Jira Context",
     version="0.1.0",
     lifespan=lifespan
 )
 
-@app.get("/")
+@payment_core.get("/")
 async def root():
     return {"message": "Payment Gateway Service is Running"}
 
-@app.get("/health")
+@payment_core.get("/health")
 async def health_check():
     return {
         "status": "healthy",
@@ -78,8 +78,8 @@ async def health_check():
         "version": "0.1.0"
     }
 """,
-    "app/core/__init__.py": "",
-    "app/core/config.py": """from pydantic_settings import BaseSettings
+    "payment_core/core/__init__.py": "",
+    "payment_core/core/config.py": """from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     DB_USER: str
@@ -98,9 +98,9 @@ class Settings(BaseSettings):
 
 settings = Settings()
 """,
-    "app/db/__init__.py": "",
-    "app/services/__init__.py": "",
-    "app/schemas/__init__.py": "",
+    "payment_core/db/__init__.py": "",
+    "payment_core/services/__init__.py": "",
+    "payment_core/schemas/__init__.py": "",
 }
 
 
@@ -128,7 +128,7 @@ def create_project():
     print("2. source .venv/bin/activate (or .venv\\Scripts\\activate on Windows)")
     print("3. pip install -r requirements.txt")
     print("4. docker-compose up -d")
-    print("5. uvicorn app.main:app --reload")
+    print("5. uvicorn payment_core.main:payment_core --reload")
 
 
 if __name__ == "__main__":

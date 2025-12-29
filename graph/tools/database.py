@@ -1,9 +1,9 @@
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
-from app.db.session import SessionLocal
-from app.models.knowledge import JiraKnowledge
-from datetime import datetime
+from knowledge_base.database import SessionLocal
+from knowledge_base.models import JiraKnowledge
+from datetime import datetime, timezone
 
 
 @tool
@@ -39,23 +39,52 @@ def save_ticket_knowledge(
 
     session: Session = SessionLocal()
     try:
-        # ใช้ merge เพื่อทำ Upsert (ถ้ามีอยู่แล้วจะแก้ ถ้าไม่มีจะสร้างใหม่)
-        knowledge = JiraKnowledge(
-            issue_key=issue_key,
-            issue_type=issue_type,
-            parent_key=parent_key,
-            issue_links=issue_links,  # [NEW]
-            summary=summary,
-            business_logic=business_logic,
-            technical_spec=technical_spec,
-            test_scenarios=test_scenarios,
-            status=status,
-            last_synced_at=datetime.now()
-        )
+        # Check if exists
+        ticket = session.query(JiraKnowledge).filter(JiraKnowledge.issue_key == issue_key).first()
 
-        session.merge(knowledge)
+        # 🟢 สร้างเวลาปัจจุบันแบบ UTC (เพื่อแก้ปัญหาเวลาเด้ง)
+        now_utc = datetime.now(timezone.utc)
+
+        if ticket:
+            # UPDATE existing
+            ticket.summary = summary
+            ticket.status = status
+            ticket.business_logic = business_logic
+            ticket.technical_spec = technical_spec
+            ticket.test_scenarios = test_scenarios
+            ticket.issue_links = issue_links
+            ticket.parent_key = parent_key
+            ticket.issue_type = issue_type
+
+            # ✅ ใช้ตัวแปร UTC ที่สร้างไว้
+            ticket.updated_at = now_utc
+
+            action = "Updated"
+        else:
+            # CREATE new
+            ticket = JiraKnowledge(
+                issue_key=issue_key,
+                summary=summary,
+                status=status,
+                business_logic=business_logic,
+                technical_spec=technical_spec,
+                test_scenarios=test_scenarios,
+                issue_links=issue_links,
+                parent_key=parent_key,
+                issue_type=issue_type,
+
+                # ✅ ใช้ตัวแปร UTC ที่สร้างไว้
+                created_at=now_utc,
+                updated_at=now_utc
+            )
+            session.add(ticket)
+            action = "Created"
+
         session.commit()
-        return f"✅ Successfully saved knowledge for {issue_key}."
+
+        # ส่งค่ากลับพร้อมเวลา Local (แปลงเป็นไทยให้ดูง่ายๆ ตรงนี้)
+        local_time = now_utc.astimezone().strftime('%Y-%m-%d %H:%M:%S')
+        return f"Successfully {action} ticket {issue_key} at {local_time}"
 
     except Exception as e:
         session.rollback()
