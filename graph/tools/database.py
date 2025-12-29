@@ -5,6 +5,7 @@ from knowledge_base.database import SessionLocal
 from knowledge_base.models import JiraKnowledge
 from datetime import datetime, timezone
 import logging
+from knowledge_base.vector_store import add_ticket_to_vector
 
 
 @tool
@@ -88,6 +89,26 @@ def save_ticket_knowledge(
 
         # 👇 เพิ่ม Log บรรทัดนี้
         logging.info(f"✅ COMMIT SUCCESS: {issue_key}")
+
+        # 👇 2. เพิ่มส่วนนี้ต่อท้าย (หลังจาก Commit SQL เสร็จ)
+        # -----------------------------------------------------
+        #  VECTOR STORE INTEGRATION
+        # -----------------------------------------------------
+        try:
+            # รวมข้อมูลสำคัญๆ ให้ Vector จำ
+            vector_content = f"""
+                    Status: {status}
+                    Business Logic: {business_logic}
+                    Tech Spec: {technical_spec}
+                    Test Scenarios: {test_scenarios}
+                    """
+
+            # เรียกฟังก์ชันยัดลง Vector
+            add_ticket_to_vector(issue_key, summary, vector_content)
+
+        except Exception as vec_e:
+            logging.error(f"⚠️ VECTOR SAVE FAILED (But SQL saved): {vec_e}")
+        # -----------------------------------------------------
 
         # ส่งค่ากลับพร้อมเวลา Local (แปลงเป็นไทยให้ดูง่ายๆ ตรงนี้)
         local_time = now_utc.astimezone().strftime('%Y-%m-%d %H:%M:%S')

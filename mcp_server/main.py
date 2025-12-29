@@ -329,6 +329,7 @@ def ask_project_guru(question: str) -> str:
     # ใช้ Vector Search แทน SQL Search ธรรมดา
     return search_vector_db(question, k=4)
 
+
 if __name__ == "__main__":
     logging.info("Run command executing...")
     try:

@@ -76,7 +76,7 @@ def agent_node(state: AgentState):
         logging.info(f"🔧 TOOL OUTPUT (DEBUG): {tool_output_msg.content}")
 
     # 🛑 CHECKPOINT: ถ้า Save สำเร็จแล้ว จบงาน
-    if tool_output_msg and "Successfully saved" in str(tool_output_msg.content):
+    if tool_output_msg and "Successfully" in str(tool_output_msg.content):
         return {"messages": [AIMessage(content="✅ Sync Process Completed Successfully.")]}
 
     # 🛑 2. ถ้ามี Error (เพิ่มส่วนนี้เข้าไป!)
