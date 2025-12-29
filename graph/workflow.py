@@ -71,9 +71,18 @@ def agent_node(state: AgentState):
 
     tool_output_msg = next((m for m in reversed(messages) if isinstance(m, ToolMessage)), None)
 
+    # 🔍 DEBUG: เพิ่มบรรทัดนี้เพื่อดูว่า Tool ตอบอะไรกลับมา (Error อะไร)
+    if tool_output_msg:
+        logging.info(f"🔧 TOOL OUTPUT (DEBUG): {tool_output_msg.content}")
+
     # 🛑 CHECKPOINT: ถ้า Save สำเร็จแล้ว จบงาน
     if tool_output_msg and "Successfully saved" in str(tool_output_msg.content):
         return {"messages": [AIMessage(content="✅ Sync Process Completed Successfully.")]}
+
+    # 🛑 2. ถ้ามี Error (เพิ่มส่วนนี้เข้าไป!)
+    if tool_output_msg and "Error saving ticket" in str(tool_output_msg.content):
+        error_detail = tool_output_msg.content
+        return {"messages": [AIMessage(content=f"❌ STOP: Database Save Failed.\nReason: {error_detail}")]}
 
     response = None
 
@@ -98,28 +107,36 @@ def agent_node(state: AgentState):
 
                 TASK: Extract critical info from Jira text to 'save_ticket_knowledge'.
 
-                ⚠️ STRICT SUMMARIZATION RULES (SAVE TOKENS!):
+                ⚠️ CRITICAL RULE: YOU MUST CALL 'save_ticket_knowledge' TOOL IN EVERY CASE, EVEN IF DATA IS EMPTY.
 
-                1. issue_key, summary, status, parent_key, issue_type: Extract exactly.
+                👇 EXTRACTION RULES:
+                
+                0. CLEANING DATA:
+                   - ⛔ REMOVE all special characters like '', bullets (•), or emoticons.
+                   - REPLACE bullets with asterisks (*).
+                   - ENSURE all text is standard UTF-8 / ASCII.
+
+                1. issue_key, summary, status, parent_key, issue_type: 
+                   - Extract exactly from input.
 
                 2. business_logic: 
-                   - Summarize the 'Goal' and 'Key Rules' in 3-5 bullet points.
-                   - ⛔ DO NOT copy-paste the whole description.
+                   - IF DATA EXISTS: Summarize 'Goal' and 'Key Rules' (3-5 bullets).
+                   - IF EMPTY: Write "No details provided".
 
                 3. technical_spec: 
-                   - List APIs (Method/Path only), DB Tables, and Libraries.
-                   - ⛔ IF JSON IS PRESENT: Write "Payload: {json_structure_summary}" (Do not copy full JSON).
-                   - ⛔ USE SINGLE QUOTES inside strings to avoid JSON errors.
+                   - IF DATA EXISTS: List APIs, Tables, Libraries. Use SINGLE QUOTES inside strings.
+                   - IF EMPTY: Write "No technical details provided".
 
                 4. test_scenarios: 
-                   - Create 3-5 high-level test case titles (e.g., "Verify that...").
-                   - ⛔ DO NOT repeat Business Logic here.
+                   - IF DATA EXISTS: Create 3-5 high-level test titles.
+                   - ⚠️ OUTPUT AS STRING (Text), NOT LIST.
+                   - Format: "- Test Case 1\n- Test Case 2"
+                   - If empty, write "No test scenarios provided".
 
                 5. issue_links: 
-                   - Extract valid links only. 
-                   - ⛔ IF EMPTY: Send [] (Empty List).
+                   - Extract valid links. IF EMPTY: Send [].
 
-                ⛔ OUTPUT RAW JSON TOOL CALL ONLY. NO CHAT.
+                ⛔ OUTPUT RAW JSON TOOL CALL ONLY. DO NOT CHAT. DO NOT APOLOGIZE.
                 """
 
         fresh_messages = [
@@ -129,37 +146,41 @@ def agent_node(state: AgentState):
 
         response = llm.bind_tools([save_ticket_knowledge], tool_choice="save_ticket_knowledge").invoke(fresh_messages)
 
-    # 🔥🔥🔥 SAFETY NET V2: The Ultimate Parser (AST + JSON) 🔥🔥🔥
-    # ถ้า AI ไม่เรียก Tool แต่พ่น JSON ออกมาเป็น Text
-    if not getattr(response, 'tool_calls', None) and response.content.strip().startswith('{'):
-        print("⚠️ DETECTED FAKE TOOL CALL (TEXT JSON) - ATTEMPTING REPAIR...")
-        content_str = response.content.strip()
-        data = None
+        # 🔍 DEBUG: ขอดูหน่อยซิว่า AI ตอบอะไรมา (สำคัญมาก!)
+        logging.info(f"🤖 AI RESPONSE CONTENT: {response.content}")
+        logging.info(f"🔧 AI TOOL CALLS: {getattr(response, 'tool_calls', 'None')}")
 
-        # วิธีที่ 1: ลองแปลงแบบ JSON ปกติ (ผ่อนปรน)
-        try:
-            data = json.loads(content_str, strict=False)
-        except:
-            pass
+        # 🔥🔥🔥 SAFETY NET V2: The Ultimate Parser (AST + JSON) 🔥🔥🔥
+        # ถ้า AI ไม่เรียก Tool แต่พ่น JSON ออกมาเป็น Text
+        if not getattr(response, 'tool_calls', None) and response.content.strip().startswith('{'):
+            print("⚠️ DETECTED FAKE TOOL CALL (TEXT JSON) - ATTEMPTING REPAIR...")
+            content_str = response.content.strip()
+            data = None
 
-        # วิธีที่ 2: ลองแปลงแบบ Python Dictionary (เทพกว่า รับ Quote ซ้อนได้)
-        if data is None:
+            # วิธีที่ 1: ลองแปลงแบบ JSON ปกติ (ผ่อนปรน)
             try:
-                # แปลง keyword json เป็น python
-                py_str = content_str.replace("true", "True").replace("false", "False").replace("null", "None")
-                data = ast.literal_eval(py_str)
-                print("✅ REPAIRED using AST (Python Parser)!")
-            except Exception as e:
-                print(f"❌ Failed to parse via AST: {e}")
+                data = json.loads(content_str, strict=False)
+            except:
+                pass
 
-        # ยัดเยียดความเป็น Tool Call
-        if data and "name" in data and "parameters" in data:
-            response.tool_calls = [{
-                "name": data["name"],
-                "args": data["parameters"],
-                "id": "manual_fix_id"
-            }]
-            response.content = ""
+            # วิธีที่ 2: ลองแปลงแบบ Python Dictionary (เทพกว่า รับ Quote ซ้อนได้)
+            if data is None:
+                try:
+                    # แปลง keyword json เป็น python
+                    py_str = content_str.replace("true", "True").replace("false", "False").replace("null", "None")
+                    data = ast.literal_eval(py_str)
+                    print("✅ REPAIRED using AST (Python Parser)!")
+                except Exception as e:
+                    print(f"❌ Failed to parse via AST: {e}")
+
+            # ยัดเยียดความเป็น Tool Call
+            if data and "name" in data and "parameters" in data:
+                response.tool_calls = [{
+                    "name": data["name"],
+                    "args": data["parameters"],
+                    "id": "manual_fix_id"
+                }]
+                response.content = ""
 
     return {"messages": [response]}
 

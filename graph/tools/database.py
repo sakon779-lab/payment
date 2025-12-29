@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from knowledge_base.database import SessionLocal
 from knowledge_base.models import JiraKnowledge
 from datetime import datetime, timezone
+import logging
 
 
 @tool
@@ -36,6 +37,9 @@ def save_ticket_knowledge(
     # ในฟังก์ชัน save_ticket_knowledge ก่อนบรรทัด knowledge = JiraKnowledge(...)
     if parent_key == "None" or parent_key == "":
         parent_key = None
+
+    # 👇 เพิ่ม Log บรรทัดนี้
+    logging.info(f"💾 ATTEMPTING TO SAVE: {issue_key}")
 
     session: Session = SessionLocal()
     try:
@@ -82,12 +86,17 @@ def save_ticket_knowledge(
 
         session.commit()
 
+        # 👇 เพิ่ม Log บรรทัดนี้
+        logging.info(f"✅ COMMIT SUCCESS: {issue_key}")
+
         # ส่งค่ากลับพร้อมเวลา Local (แปลงเป็นไทยให้ดูง่ายๆ ตรงนี้)
         local_time = now_utc.astimezone().strftime('%Y-%m-%d %H:%M:%S')
         return f"Successfully {action} ticket {issue_key} at {local_time}"
 
     except Exception as e:
         session.rollback()
+        # 👇 เพิ่ม Log บรรทัดนี้ (สำคัญที่สุด!)
+        logging.error(f"❌ DATABASE ERROR: {str(e)}")
         return f"❌ Error saving to DB: {str(e)}"
     finally:
         session.close()

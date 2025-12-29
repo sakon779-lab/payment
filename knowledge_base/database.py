@@ -14,7 +14,7 @@ DB_NAME = os.getenv("DB_NAME", "payment_poc")
 
 # 2. สร้าง Connection String
 # หมายเหตุ: ถ้าใช้ Driver อื่น (เช่น asyncpg) อาจต้องแก้ตรงนี้ แต่นี่คือ Standard
-SQLALCHEMY_DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{SERVER}:{PORT}/{DB_NAME}"
+SQLALCHEMY_DATABASE_URL = f"postgresql://{USER}:{PASSWORD}@{SERVER}:{PORT}/{DB_NAME}?client_encoding=utf8"
 
 # 3. สร้าง Base Class (ย้ายมาจาก base_class.py)
 # คลาสนี้จะเป็นแม่แบบให้ Table ต่างๆ สืบทอด
