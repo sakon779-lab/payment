@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 # 👇 เพิ่ม 3 บรรทัดนี้ เพื่อให้ Python มองเห็นโฟลเดอร์ Project หลัก
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from knowledge_base.vector_store import add_ticket_to_vector, search_vector_db
+from graph.tools.file_ops import read_file, write_file, list_directory
+from graph.tools.git_ops import git_create_branch, git_commit_changes, git_status, git_push_to_remote # 👈 เพิ่ม import
 
 # --- 1. SETUP LOGGING ---
 # สำคัญมาก: ห้ามใช้ print() ใน MCP Server ให้ใช้ logging แทน
@@ -329,6 +331,46 @@ def ask_project_guru(question: str) -> str:
     # ใช้ Vector Search แทน SQL Search ธรรมดา
     return search_vector_db(question, k=4)
 
+# --------------------------
+# FILE SYSTEM TOOLS
+# --------------------------
+@mcp.tool()
+def read_project_file(path: str):
+    """Read code or text file from the project."""
+    return read_file.invoke({"file_path": path})
+
+@mcp.tool()
+def write_project_file(path: str, content: str):
+    """Write content to a file. USE WITH CAUTION."""
+    return write_file.invoke({"file_path": path, "content": content})
+
+@mcp.tool()
+def list_project_files(path: str = "."):
+    """See file structure."""
+    return list_directory.invoke({"dir_path": path})
+
+# --------------------------
+# GIT TOOLS
+# --------------------------
+@mcp.tool()
+def git_new_branch(name: str):
+    """Start working on a new feature branch."""
+    return git_create_branch.invoke({"branch_name": name})
+
+@mcp.tool()
+def git_commit(msg: str):
+    """Save changes to git."""
+    return git_commit_changes.invoke({"message": msg})
+
+@mcp.tool()
+def git_check_status():
+    """Check current branch and changed files."""
+    return git_status.invoke({})
+
+@mcp.tool()
+def git_push(branch: str):
+    """Push code to GitHub."""
+    return git_push_to_remote.invoke({"branch_name": branch})
 
 if __name__ == "__main__":
     logging.info("Run command executing...")
