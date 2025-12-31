@@ -7,3 +7,5 @@ pg_data/
 .idea/
 .vscode/
 mcp_debug.log
+chroma_db/
+*.sqlite3
