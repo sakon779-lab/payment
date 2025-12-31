@@ -28,7 +28,8 @@ def run_git_command(args: list):
             capture_output=True,
             text=True,
             check=True,
-            env=env  # 👈 ใส่ env เข้าไป
+            env=env,
+            timeout=30  # 👈 เพิ่มบรรทัดนี้: ถ้าเกิน 30 วิ ให้ Error เลย!
         )
         return result.stdout.strip()
     except subprocess.CalledProcessError as e:
