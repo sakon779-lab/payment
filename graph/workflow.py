@@ -18,6 +18,16 @@ from graph.state import AgentState
 from graph.tools.database import save_ticket_knowledge
 from graph.tools.jira import get_jira_ticket
 
+# 👇 1. Import Tools ใหม่เข้ามา
+from graph.tools.file_ops import read_file, write_file, list_directory
+from graph.tools.git_ops import (
+    git_create_branch,
+    git_commit_changes,
+    git_status,
+    git_push_to_remote,
+    create_pull_request
+)
+
 from langchain_core.messages import AIMessage # เพิ่ม import นี้
 import json
 
@@ -54,8 +64,19 @@ llm = ChatOllama(
     num_predict=-1
 )
 
-# รวม Tool ทั้งหมด
-tools = [get_jira_ticket, save_ticket_knowledge]
+# 👇 2. รวม Tools ทั้งหมด
+tools = [
+    get_jira_ticket,
+    save_ticket_knowledge,
+    read_file,
+    write_file,
+    list_directory,
+    git_create_branch,
+    git_commit_changes,
+    git_status,
+    git_push_to_remote,
+    create_pull_request
+]
 
 # ผูก Tool เข้ากับสมอง
 llm_with_tools = llm.bind_tools(tools)

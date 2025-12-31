@@ -1,5 +1,6 @@
 import os
 import subprocess
+import shutil
 from langchain_core.tools import tool
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -64,3 +65,33 @@ def git_push_to_remote(branch_name: str):
     """
     # Push ไปที่ origin ตามชื่อ branch ที่ระบุ
     return run_git_command(["push", "-u", "origin", branch_name])
+
+
+@tool
+def create_pull_request(title: str, body: str, branch: str):
+    """
+    Create a Pull Request on GitHub using 'gh' CLI.
+    Must be called AFTER pushing the branch.
+    """
+    # ตรวจสอบว่ามี gh-cli ไหม
+    if not shutil.which("gh"):
+        return "Error: GitHub CLI (gh) is not installed on the server."
+
+    try:
+        # คำสั่งสร้าง PR: gh pr create --title "..." --body "..." --head ... --base main
+        result = subprocess.run(
+            [
+                "gh", "pr", "create",
+                "--title", title,
+                "--body", body,
+                "--head", branch,
+                "--base", "main" # หรือ master แล้วแต่โปรเจกต์
+            ],
+            cwd=BASE_DIR,
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return f"✅ Pull Request Created Successfully: {result.stdout.strip()}"
+    except subprocess.CalledProcessError as e:
+        return f"Failed to create PR: {e.stderr}"

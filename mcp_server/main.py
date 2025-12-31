@@ -3,15 +3,6 @@ import os
 import httpx
 import logging
 from typing import List
-from mcp.server.fastmcp import FastMCP
-from dotenv import load_dotenv
-from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
-# 👇 เพิ่ม 3 บรรทัดนี้ เพื่อให้ Python มองเห็นโฟลเดอร์ Project หลัก
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from knowledge_base.vector_store import add_ticket_to_vector, search_vector_db
-from graph.tools.file_ops import read_file, write_file, list_directory
-from graph.tools.git_ops import git_create_branch, git_commit_changes, git_status, git_push_to_remote # 👈 เพิ่ม import
 
 # --- 1. SETUP LOGGING ---
 # สำคัญมาก: ห้ามใช้ print() ใน MCP Server ให้ใช้ logging แทน
@@ -22,6 +13,29 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     force=True
 )
+
+# ดักจับ Error ทุกอย่างที่ทำให้โปรแกรมพัง แล้วเขียนลงไฟล์
+def handle_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+    logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+
+sys.excepthook = handle_exception
+
+from mcp.server.fastmcp import FastMCP
+
+from dotenv import load_dotenv
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session
+# 👇 เพิ่ม 3 บรรทัดนี้ เพื่อให้ Python มองเห็นโฟลเดอร์ Project หลัก
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from knowledge_base.vector_store import add_ticket_to_vector, search_vector_db
+from graph.tools.file_ops import read_file, write_file, list_directory
+from graph.tools.git_ops import git_create_branch, git_commit_changes, git_status, git_push_to_remote # 👈 เพิ่ม import
+from graph.tools.git_ops import create_pull_request # เพิ่ม import
+
+
 
 logging.info("🚀 Starting MCP Server...")
 
@@ -371,6 +385,15 @@ def git_check_status():
 def git_push(branch: str):
     """Push code to GitHub."""
     return git_push_to_remote.invoke({"branch_name": branch})
+
+@mcp.tool()
+def github_create_pr(title: str, description: str, branch_name: str):
+    """Create a PR on GitHub after pushing code."""
+    return create_pull_request.invoke({
+        "title": title,
+        "body": description,
+        "branch": branch_name
+    })
 
 if __name__ == "__main__":
     logging.info("Run command executing...")
