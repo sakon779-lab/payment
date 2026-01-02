@@ -13,15 +13,14 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 
 def run_git_command(args: list):
-    """รันคำสั่ง Git แบบห้ามถาม (Non-interactive)"""
     command_str = " ".join(["git"] + args)
     logger.info(f"⏳ GIT RUNNING: {command_str}")
 
     try:
-        # 👇 เทคนิคสำคัญ: ปิดการถาม Password/Prompt
         env = os.environ.copy()
-        env["GIT_TERMINAL_PROMPT"] = "0"
+        env["GIT_TERMINAL_PROMPT"] = "0"  # ห้ามถาม Password
 
+        # 👇 ไฮไลท์สำคัญ: ต้องมี timeout=15
         result = subprocess.run(
             ["git"] + args,
             cwd=BASE_DIR,
@@ -29,14 +28,17 @@ def run_git_command(args: list):
             text=True,
             check=True,
             env=env,
-            timeout=30  # 👈 เพิ่มบรรทัดนี้: ถ้าเกิน 30 วิ ให้ Error เลย!
+            timeout=15  # 👈 ใส่บรรทัดนี้ครับ! ถ้าเกิน 15 วิ ให้ Error เลย
         )
         return result.stdout.strip()
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"⏱️ TIMEOUT: Git took too long ({command_str})")
+        return "Error: Git command timed out. Please check for file locks or open editors."
+
     except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.strip()
-        logger.error(f"❌ GIT ERROR: {error_msg}")
-        # ส่ง Error กลับไปให้ AI รู้เรื่อง (แทนที่จะเงียบ)
-        return f"Git Error: {error_msg}"
+        logger.error(f"❌ GIT ERROR: {e.stderr}")
+        return f"Error: {e.stderr}"
 
 
 @tool
