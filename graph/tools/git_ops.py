@@ -25,6 +25,7 @@ def run_git_command(args: list):
             ["git"] + args,
             cwd=BASE_DIR,
             capture_output=True,
+            stdin=subprocess.DEVNULL,  # <--- ใส่ตัวนี้สำคัญมาก
             text=True,
             check=True,
             env=env,
