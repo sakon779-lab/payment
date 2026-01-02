@@ -79,23 +79,50 @@ def create_pull_request(title: str, body: str, branch: str):
     if not shutil.which("gh"):
         return "Error: GitHub CLI (gh) is not installed."
 
+    # ตรวจสอบ Base branch ว่าเป็น main หรือ master (Optional: ถ้าจะเอาให้ชัวร์)
+    # แต่ถ้าโปรเจกต์คุณใช้ main ตลอด ก็ใช้แบบเดิมได้ครับ
+    base_branch = "main"
+
     try:
-        # gh cli ปกติจะไม่ถามถ้า input ครบ
+        # gh cli parameters
         cmd = [
             "gh", "pr", "create",
             "--title", title,
             "--body", body,
             "--head", branch,
-            "--base", "main"
+            "--base", base_branch
         ]
+
+        logger.info(f"⏳ PR CREATING: Merging {branch} -> {base_branch}")
+
+        # เพิ่ม Env เพื่อปิดลูกเล่น Interactive ของ gh
+        env = os.environ.copy()
+        env["GH_NO_UPDATE_NOTIFIER"] = "1"  # ปิดแจ้งเตือน update
+        env["GH_PROMPT_DISABLE"] = "1"  # ห้ามถามอะไรทั้งนั้น
 
         result = subprocess.run(
             cmd,
             cwd=BASE_DIR,
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            env=env,  # ใช้ Env ที่ตั้งค่าไว้
+            stdin=subprocess.DEVNULL,  # <--- กันตาย: ห้ามรอ Input
+            timeout=60  # <--- กันเหนียว: ให้เวลา 60 วิ (เผื่อเน็ตช้า)
         )
         return f"✅ PR Created: {result.stdout.strip()}"
+
+    except subprocess.TimeoutExpired:
+        logger.error("⏱️ TIMEOUT: GH PR Create took too long")
+        return "Error: Creating PR timed out. Please check your internet connection."
+
     except subprocess.CalledProcessError as e:
-        return f"PR Failed: {e.stderr}"
+        # อ่าน Error จริงๆ จาก stderr
+        error_msg = e.stderr.strip()
+        logger.error(f"❌ GH PR ERROR: {error_msg}")
+
+        # กรณี Base branch ไม่ตรง หรือมี PR อยู่แล้ว
+        if "already exists" in error_msg:
+            return f"Warning: A PR for {branch} already exists."
+
+        return f"PR Failed: {error_msg}"
