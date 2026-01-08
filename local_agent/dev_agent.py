@@ -101,43 +101,71 @@ Example 4: Finish task
     "summary": "Created branch and file successfully."
   }
 }
-}
 
 Remember: ALWAYS respond with a JSON block like the examples above. """
 
 
-def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
+    """
+    แกะ JSON ทั้งหมดที่หาเจอในข้อความ
+    (รองรับกรณี AI ตอบหลายคำสั่งต่อกัน เช่น Create Branch -> Write File)
+    """
+    results = []
     try:
-        json_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group(1))
-        json_match_raw = re.search(r"(\{.*\})", text, re.DOTALL)
-        if json_match_raw:
-            return json.loads(json_match_raw.group(1))
+        # ---------------------------------------------------------
+        # Pattern 1: หาแบบมีกรอบ ```json ... ``` (มาตรฐานที่สุด)
+        # ---------------------------------------------------------
+        # re.DOTALL ช่วยให้ .* อ่านข้ามบรรทัดได้
+        matches = re.finditer(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+        for match in matches:
+            try:
+                data = json.loads(match.group(1))
+                results.append(data)
+            except json.JSONDecodeError:
+                pass
+
+        # ---------------------------------------------------------
+        # Pattern 2: ถ้าไม่เจอแบบมีกรอบ ให้หาแบบดิบๆ { ... }
+        # ---------------------------------------------------------
+        # ใช้เงื่อนไข if not results เพื่อป้องกันการซ้ำซ้อน (ถ้าเจอ Pattern 1 แล้วจะไม่ทำอันนี้)
+        if not results:
+            # ใช้ non-greedy match (.*?) เพื่อแยก JSON ทีละก้อน ไม่ให้รวบเป็นก้อนเดียว
+            matches_raw = re.finditer(r"(\{.*?\})", text, re.DOTALL)
+            for match in matches_raw:
+                try:
+                    obj = json.loads(match.group(1))
+
+                    # ✅ ตัวกรองสำคัญ: ต้องมี key "action" เท่านั้นถึงจะนับเป็นคำสั่ง
+                    # (ป้องกันไปหยิบ json มั่วๆ ในคำพูด AI มา)
+                    if "action" in obj:
+                        results.append(obj)
+                except json.JSONDecodeError:
+                    pass
+
     except Exception as e:
         logger.error(f"Error parsing JSON: {e}")
-    return None
 
+    return results
 
 def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
     """
-    ฟังก์ชันอัจฉริยะ: รัน Tool อัตโนมัติโดยไม่ต้องเขียน if-else เยอะๆ
-    รองรับทั้ง Python Function ปกติ และ LangChain Tool (.invoke)
+    ฟังก์ชันอัจฉริยะ: รัน Tool อัตโนมัติโดยเช็คประเภทของ Tool ให้เอง
     """
+    # 1. เช็คว่ามี Tool ชื่อนี้ไหม
     if tool_name not in TOOLS:
         return f"Error: Unknown tool '{tool_name}'"
 
     try:
         func = TOOLS[tool_name]
 
-        # กรณี 1: เป็น LangChain Tool (พวก Git Ops มักจะเป็นแบบนี้)
+        # 2. กรณีเป็น LangChain Tool (พวก Git Ops มักจะเป็นแบบนี้)
+        # LangChain Tool ต้องเรียกใช้ผ่าน .invoke() และรับ dict ก้อนเดียว
         if hasattr(func, 'invoke'):
-            # LangChain รับ input เป็น dict เดียว
             return str(func.invoke(args))
 
-        # กรณี 2: เป็น Python Function ปกติ (File Ops ของเรา)
+        # 3. กรณีเป็น Python Function ปกติ (File Ops ของเรา)
+        # ต้องกระจาย arguments ด้วย **args
         else:
-            # ใช้ **args เพื่อกระจาย dict เข้าไปเป็น parameter
             return str(func(**args))
 
     except TypeError as e:
@@ -147,6 +175,9 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
+    """
+    Main Loop ที่รองรับ Multi-Action (ทำคำสั่ง Git รวดเดียวจบ)
+    """
     logger.info(f"🚀 Starting Task: {task_description}")
 
     history = [
@@ -157,35 +188,53 @@ def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
     for step in range(max_steps):
         logger.info(f"🔄 Step {step + 1}/{max_steps}...")
 
+        # 1. ถาม AI
         response = query_qwen(history)
 
-        # Log AI Response (ตัดให้สั้นลง)
+        # Log คำตอบ (ตัดสั้นๆ)
         log_resp = response[:100] + "..." if len(response) > 100 else response
         logger.info(f"🤖 AI Response: {log_resp}")
 
-        tool_call = _extract_json(response)
+        # 2. แกะ JSON ออกมาเป็น List (แก้จุดนี้เพื่อให้รับหลายคำสั่งได้)
+        tool_calls = _extract_all_jsons(response)
 
-        if not tool_call:
+        if not tool_calls:
+            # ถ้าไม่มี Tool ให้คุยเล่นต่อ (แต่ปกติ System Prompt เราห้ามไว้)
             history.append({"role": "assistant", "content": response})
             continue
 
-        # 3. เตรียมรัน Tool
-        action = tool_call.get("action")
-        args = tool_call.get("args", {})
+        # 3. วนลูปทำทุกคำสั่งที่ AI ส่งมา (Batch Execution)
+        step_outputs = []
+        task_finished = False
+        final_summary = ""
 
-        # Handle Task Complete
-        if action == "task_complete":
-            summary = args.get("summary", "Task finished.")
-            logger.info(f"✅ Task Completed: {summary}")
-            return f"SUCCESS: {summary}"
+        for tool_call in tool_calls:
+            action = tool_call.get("action")
+            args = tool_call.get("args", {})
 
-        logger.info(f"🔧 Executing Tool: {action}")
+            # ถ้าเจอคำสั่งจบงาน
+            if action == "task_complete":
+                final_summary = args.get("summary", "Task finished.")
+                task_finished = True
+                break  # หยุดลูป Tool ทันที
 
-        # 4. เรียกใช้ฟังก์ชันผ่านตัวช่วย Dynamic
-        result = execute_tool_dynamic(action, args)
+            logger.info(f"🔧 Executing Tool: {action}")
 
-        # 5. ส่งผลลัพธ์กลับ
+            # เรียกใช้ execute_tool_dynamic ที่เราเตรียมไว้
+            result = execute_tool_dynamic(action, args)
+
+            # เก็บผลลัพธ์
+            step_outputs.append(f"Tool Output ({action}):\n{result}")
+
+        # 4. ถ้ามีคำสั่ง task_complete ให้จบ Loop ใหญ่ทันที
+        if task_finished:
+            logger.info(f"✅ Task Completed: {final_summary}")
+            return f"SUCCESS: {final_summary}"
+
+        # 5. ส่งผลลัพธ์ทั้งหมดกลับไปให้ AI รู้ (รวมเป็นก้อนเดียว)
+        combined_output = "\n---\n".join(step_outputs)
+
         history.append({"role": "assistant", "content": response})
-        history.append({"role": "user", "content": f"Tool Output ({action}):\n{result}"})
+        history.append({"role": "user", "content": combined_output})
 
     return "❌ FAILED: Max steps reached."
