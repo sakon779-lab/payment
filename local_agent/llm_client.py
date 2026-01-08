@@ -8,7 +8,9 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 
 # ⚠️ เช็คชื่อ Model ให้ตรงกับใน 'ollama list'
 # (จาก Log เก่าคุณใช้ชื่อ model path ยาวๆ แต่ถ้า ollama list ขึ้นว่า qwen3:8b ก็ใช้ตามนั้น)
-MODEL_NAME = "qwen3:8b"
+# MODEL_NAME = "qwen3:8b"
+MODEL_NAME = "qwen2.5-coder:1.5b"
+
 
 
 def query_qwen(messages: list, temperature=0.2) -> str:
@@ -21,7 +23,7 @@ def query_qwen(messages: list, temperature=0.2) -> str:
         "stream": True,
         "temperature": temperature,
         "options": {
-            "num_ctx": 4096,  # 🔻 ลด Context ลงเหลือ 4096 ก่อน เพื่อความเร็วและชัวร์
+            "num_ctx": 2048,  # 🔻 ลด Context ลงเหลือ 4096 ก่อน เพื่อความเร็วและชัวร์
             "num_predict": -1
         }
     }
@@ -32,7 +34,7 @@ def query_qwen(messages: list, temperature=0.2) -> str:
         print("[DEBUG] ⏳ Sending request... (Waiting for headers)", flush=True)
 
         # ✅ แก้ตรงนี้: เปลี่ยน timeout=30 เป็น timeout=120 (2 นาที) หรือ None
-        with requests.post(OLLAMA_URL, json=payload, stream=True, timeout=120) as response:
+        with requests.post(OLLAMA_URL, json=payload, stream=True, timeout=None) as response:
             print(f"[DEBUG] ✅ Connected! Status Code: {response.status_code}", flush=True)
 
             if response.status_code != 200:

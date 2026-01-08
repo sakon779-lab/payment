@@ -3,80 +3,152 @@ import logging
 import re
 from typing import Dict, Any, Optional, List
 
-# Import เครื่องมือที่เราเตรียมไว้
+# Import เครื่องมือ
 from local_agent.llm_client import query_qwen
 from local_agent.tools.file_ops import list_files, read_file, write_file
 from local_agent.tools.code_analysis import generate_skeleton
 
-# Setup Logger
+# Import Git Ops
+try:
+    from graph.tools.git_ops import (
+        git_create_branch,
+        git_commit_changes,
+        git_push_to_remote,
+        git_status
+    )
+
+    GIT_ENABLED = True
+except ImportError:
+    logging.warning("⚠️ Could not import git_ops. Git capabilities disabled.")
+    GIT_ENABLED = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DevAgent")
 
-# --- System Prompt: กฎเหล็กสำหรับ Qwen ---
+# ----------------------------------------------------
+# รวม Tools ทั้งหมดไว้ที่เดียว
+# ----------------------------------------------------
+# ✅ แก้ตรงนี้: ใส่ Type Hint : Dict[str, Any] เพื่อบอก IDE ว่า "อย่าเรื่องมาก รับได้หมด"
+TOOLS: Dict[str, Any] = {
+    # File Tools เดิม
+    "list_files": list_files,
+    "read_file": read_file,
+    "write_file": write_file,
+    "generate_skeleton": generate_skeleton,
+}
+
+if GIT_ENABLED:
+    TOOLS.update({
+        "git_new_branch": git_create_branch,
+        "git_commit": git_commit_changes,
+        "git_push": git_push_to_remote,
+        "git_status": git_status
+    })
+
 SYSTEM_PROMPT = """
-You are a Senior Python Developer Agent working in a local environment.
-Your goal is to implement features or fix bugs based on user requests.
+You are an AI Developer Agent (Qwen). 
+Your responsibilities include implementing features, fixing bugs, AND managing version control (Git).
 
-**CRITICAL RULES:**
-1. **Explore First:** Do NOT write code immediately. Check existing files using `list_files` and `generate_skeleton`.
-2. **Token Efficiency:** Do NOT read full file content unless necessary. Use `generate_skeleton` to see class/function signatures.
-3. **Implementation:** When writing code, output the FULL content of the file.
-4. **Tool Usage:** You have access to tools. To use a tool, you must output a JSON block strictly in this format:
+You have access to the following tools:
+1. File Operations: 
+   - list_files(directory=".")
+   - read_file(file_path)
+   - write_file(file_path, content)
+2. Git Operations: 
+   - git_new_branch(branch_name)
+   - git_commit(message)
+   - git_push(branch_name)
+   - git_status()
 
-```json
+GUIDELINES:
+- Always check `list_files` or `git_status` first to understand the context.
+- When starting a new task, CREATE A NEW BRANCH first (unless instructed otherwise).
+- After finishing the code, ALWAYS COMMIT your changes with a descriptive message.
+- If the user asks to "Finish" or "Save", push the code to remote.
+- Think step-by-step.
+
+RESPONSE FORMAT EXAMPLES:
+
+Example 1: List files
 {
-  "action": "tool_name",
+  "action": "list_files",
   "args": {
-    "arg_name": "value"
+    "directory": "."
   }
-}```
-AVAILABLE TOOLS:
+}
 
-list_files(directory="."): List all files.
+Example 2: Create a new branch
+{
+  "action": "git_new_branch",
+  "args": {
+    "branch_name": "feature/login"
+  }
+}
 
-generate_skeleton(file_path): Get signatures (Read-friendly).
+Example 3: Write a file
+{
+  "action": "write_file",
+  "args": {
+    "file_path": "hello.py",
+    "content": "print('Hello')"
+  }
+}
 
-read_file(file_path): Read full content (Use sparingly).
+Example 4: Finish task
+{
+  "action": "task_complete",
+  "args": {
+    "summary": "Created branch and file successfully."
+  }
+}
+}
 
-write_file(file_path, content): Write/Overwrite a file.
-
-task_complete(summary): Call this when done. """
+Remember: ALWAYS respond with a JSON block like the examples above. """
 
 
 def _extract_json(text: str) -> Optional[Dict[str, Any]]:
-    """
-    ฟังก์ชันช่วยแกะ JSON จากคำตอบของ AI
-    รองรับทั้งแบบมี ```json ... ``` และแบบ JSON ล้วนๆ
-    """
     try:
-        # 1. พยายามหา block code json (```json ... ```)
         json_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
         if json_match:
             return json.loads(json_match.group(1))
-
-        # 2. ถ้าไม่มี block code ลองหา { ... } แบบดิบๆ
         json_match_raw = re.search(r"(\{.*\})", text, re.DOTALL)
         if json_match_raw:
             return json.loads(json_match_raw.group(1))
-
-    except json.JSONDecodeError:
-        pass
     except Exception as e:
         logger.error(f"Error parsing JSON: {e}")
-
     return None
 
 
+def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
+    """
+    ฟังก์ชันอัจฉริยะ: รัน Tool อัตโนมัติโดยไม่ต้องเขียน if-else เยอะๆ
+    รองรับทั้ง Python Function ปกติ และ LangChain Tool (.invoke)
+    """
+    if tool_name not in TOOLS:
+        return f"Error: Unknown tool '{tool_name}'"
+
+    try:
+        func = TOOLS[tool_name]
+
+        # กรณี 1: เป็น LangChain Tool (พวก Git Ops มักจะเป็นแบบนี้)
+        if hasattr(func, 'invoke'):
+            # LangChain รับ input เป็น dict เดียว
+            return str(func.invoke(args))
+
+        # กรณี 2: เป็น Python Function ปกติ (File Ops ของเรา)
+        else:
+            # ใช้ **args เพื่อกระจาย dict เข้าไปเป็น parameter
+            return str(func(**args))
+
+    except TypeError as e:
+        return f"Error arguments mismatch for '{tool_name}': {e}"
+    except Exception as e:
+        return f"Error executing {tool_name}: {e}"
+
+
 def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
-    """
-    Main Loop ของ Dev Agent
-    Args:
-        task_description: คำสั่งงาน (เช่น "สร้าง API Login")
-        max_steps: จำนวนรอบสูงสุดที่ให้ AI คิด
-    """
     logger.info(f"🚀 Starting Task: {task_description}")
 
-    # เริ่มต้น Chat History ด้วย System Prompt
     history = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Task: {task_description}"}
@@ -85,59 +157,34 @@ def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
     for step in range(max_steps):
         logger.info(f"🔄 Step {step + 1}/{max_steps}...")
 
-        # 1. ส่ง Chat History ให้ Qwen คิด
         response = query_qwen(history)
 
-        # Log คำตอบ AI (ตัดสั้นๆ เพื่อความสะอาดของ Log)
+        # Log AI Response (ตัดให้สั้นลง)
         log_resp = response[:100] + "..." if len(response) > 100 else response
         logger.info(f"🤖 AI Response: {log_resp}")
 
-        # 2. แกะ JSON Tool Call จากคำตอบ
         tool_call = _extract_json(response)
 
         if not tool_call:
-            # ถ้า AI ไม่เรียก Tool (พูดคุยเฉยๆ) ให้เก็บลง History แล้วไปต่อ
             history.append({"role": "assistant", "content": response})
             continue
 
         # 3. เตรียมรัน Tool
         action = tool_call.get("action")
         args = tool_call.get("args", {})
-        result = ""
+
+        # Handle Task Complete
+        if action == "task_complete":
+            summary = args.get("summary", "Task finished.")
+            logger.info(f"✅ Task Completed: {summary}")
+            return f"SUCCESS: {summary}"
 
         logger.info(f"🔧 Executing Tool: {action}")
 
-        try:
-            # 4. เรียกใช้ฟังก์ชันจริงตามชื่อ Tool
-            if action == "list_files":
-                result = list_files(args.get("directory", "."))
+        # 4. เรียกใช้ฟังก์ชันผ่านตัวช่วย Dynamic
+        result = execute_tool_dynamic(action, args)
 
-            elif action == "generate_skeleton":
-                result = generate_skeleton(args.get("file_path"))
-
-            elif action == "read_file":
-                result = read_file(args.get("file_path"))
-
-            elif action == "write_file":
-                # ตรวจสอบว่า parameter ครบไหม
-                if "file_path" in args and "content" in args:
-                    result = write_file(args.get("file_path"), args.get("content"))
-                else:
-                    result = "Error: Missing 'file_path' or 'content' in arguments."
-
-            elif action == "task_complete":
-                summary = args.get("summary", "Task finished.")
-                logger.info(f"✅ Task Completed: {summary}")
-                return f"SUCCESS: {summary}"
-
-            else:
-                result = f"Error: Unknown tool '{action}'"
-
-        except Exception as e:
-            result = f"Error executing tool: {str(e)}"
-
-        # 5. ส่งผลลัพธ์ Tool กลับไปให้ AI รู้
-        # (ต้องเก็บคำตอบ AI ก่อนหน้านี้ลง history ด้วย เพื่อให้บทสนทนาต่อเนื่อง)
+        # 5. ส่งผลลัพธ์กลับ
         history.append({"role": "assistant", "content": response})
         history.append({"role": "user", "content": f"Tool Output ({action}):\n{result}"})
 
