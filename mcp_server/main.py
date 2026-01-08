@@ -52,6 +52,16 @@ try:
     from knowledge_base.database import SessionLocal
     from knowledge_base.models import JiraKnowledge
 
+    # --- [NEW] IMPORT LOCAL AGENT ---
+    from local_agent.dev_agent import run_dev_agent_task
+
+    logging.info("✅ Local Agent loaded successfully.")
+
+except ImportError as e:
+    logging.error(f"⚠️ Import Error (Local Agent or Graph): {e}")
+    # Dummy function if import fails
+    def run_dev_agent_task(task): return f"Error: Local Agent module not found. {e}"
+
 except Exception as e:
     logging.critical(f"❌ CRITICAL ERROR during startup: {str(e)}", exc_info=True)
     sys.exit(1)
@@ -362,6 +372,33 @@ def write_project_file(path: str, content: str):
 def list_project_files(path: str = "."):
     """See file structure."""
     return list_directory.invoke({"dir_path": path})
+
+
+# ==========================================
+# 🆕 NEW TOOL: LOCAL DEV AGENT BRIDGE
+# ==========================================
+
+@mcp.tool()
+def run_local_task(task_description: str) -> str:
+    """
+    Run a software development task on the local machine using the Local Agent (Qwen).
+    Use this tool when the user asks to edit files, list files, or write code locally.
+
+    Args:
+        task_description: The description of the task (e.g., "Create a file named hello.py", "List files in project")
+    """
+    logging.info(f"🤖 Calling Local Agent: {task_description}")
+    try:
+        # เรียกใช้ Agent ที่เราเทสต์ผ่าน
+        result = run_dev_agent_task(task_description)
+        return str(result)
+    except Exception as e:
+        error_msg = f"Error executing local task: {str(e)}"
+        logging.error(error_msg)
+        return error_msg
+
+
+# ==========================================
 
 # --------------------------
 # GIT TOOLS

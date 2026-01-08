@@ -29,7 +29,7 @@ Your goal is to implement features or fix bugs based on user requests.
   "args": {
     "arg_name": "value"
   }
-}
+}```
 AVAILABLE TOOLS:
 
 list_files(directory="."): List all files.
