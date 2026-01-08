@@ -107,43 +107,40 @@ Remember: ALWAYS respond with a JSON block like the examples above. """
 
 def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
     """
-    แกะ JSON ทั้งหมดที่หาเจอในข้อความ
-    (รองรับกรณี AI ตอบหลายคำสั่งต่อกัน เช่น Create Branch -> Write File)
+    แกะ JSON แบบอัจฉริยะ (ใช้ Decoder ของ Python เอง)
+    รองรับ Nested JSON และ Multiple JSONs ต่อกันได้ 100%
     """
     results = []
-    try:
-        # ---------------------------------------------------------
-        # Pattern 1: หาแบบมีกรอบ ```json ... ``` (มาตรฐานที่สุด)
-        # ---------------------------------------------------------
-        # re.DOTALL ช่วยให้ .* อ่านข้ามบรรทัดได้
-        matches = re.finditer(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
-        for match in matches:
-            try:
-                data = json.loads(match.group(1))
-                results.append(data)
-            except json.JSONDecodeError:
-                pass
+    decoder = json.JSONDecoder()
+    pos = 0
 
-        # ---------------------------------------------------------
-        # Pattern 2: ถ้าไม่เจอแบบมีกรอบ ให้หาแบบดิบๆ { ... }
-        # ---------------------------------------------------------
-        # ใช้เงื่อนไข if not results เพื่อป้องกันการซ้ำซ้อน (ถ้าเจอ Pattern 1 แล้วจะไม่ทำอันนี้)
-        if not results:
-            # ใช้ non-greedy match (.*?) เพื่อแยก JSON ทีละก้อน ไม่ให้รวบเป็นก้อนเดียว
-            matches_raw = re.finditer(r"(\{.*?\})", text, re.DOTALL)
-            for match in matches_raw:
-                try:
-                    obj = json.loads(match.group(1))
+    while pos < len(text):
+        # 1. ข้ามตัวอักษรขยะ จนกว่าจะเจอ '{'
+        try:
+            # หาตำแหน่งเริ่มต้นของปีกกาเปิด
+            search = re.search(r"\{", text[pos:])
+            if not search:
+                break  # ไม่เหลือ JSON แล้ว
 
-                    # ✅ ตัวกรองสำคัญ: ต้องมี key "action" เท่านั้นถึงจะนับเป็นคำสั่ง
-                    # (ป้องกันไปหยิบ json มั่วๆ ในคำพูด AI มา)
-                    if "action" in obj:
-                        results.append(obj)
-                except json.JSONDecodeError:
-                    pass
+            start_index = pos + search.start()
 
-    except Exception as e:
-        logger.error(f"Error parsing JSON: {e}")
+            # 2. ให้ Python Decoder ช่วยแกะ JSON object ออกมา
+            # raw_decode จะคืนค่า (object, index_ที่จบ)
+            obj, end_index = decoder.raw_decode(text, idx=start_index)
+
+            # 3. ตรวจสอบและเก็บผลลัพธ์
+            if isinstance(obj, dict) and "action" in obj:
+                results.append(obj)
+
+            # 4. ขยับ Cursor ไปต่อท้าย JSON ที่เพิ่งแกะได้
+            pos = end_index
+
+        except json.JSONDecodeError:
+            # ถ้าแกะพัง ให้ขยับไปข้างหน้า 1 ช่องแล้วลองใหม่
+            pos += 1
+        except Exception as e:
+            logger.error(f"Error extracting JSON: {e}")
+            break
 
     return results
 
