@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import subprocess
 from typing import Dict, Any, Optional, List
 
 # Import เครื่องมือ
@@ -25,16 +26,64 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DevAgent")
 
+# ✅ เพิ่มบรรทัดนี้ครับ! ไม่งั้นฟังก์ชัน init_workspace จะพังเพราะหาตัวแปรไม่เจอ
+PROJECT_ROOT = "D:\WorkSpace"
+# หรือใส่ Path เต็ม เช่น: PROJECT_ROOT = r"D:\Project\PaymentBlockChain"
+
+# ----------------------------------------------------
+# 🆕 New Tool: Init Workspace Logic (Safety First)
+# ----------------------------------------------------
+def init_workspace(branch_name: str, base_branch: str = "main") -> str:
+    """
+    Safety Check & Setup:
+    1. Force change directory to PROJECT_ROOT.
+    2. Check for uncommitted changes (must be clean).
+    3. Checkout base branch (main/master).
+    4. Pull latest changes.
+    5. Create and checkout new feature branch.
+    """
+    try:
+        # 0. 🎯 Lock Workspace
+        if PROJECT_ROOT and PROJECT_ROOT != ".":
+            if os.path.exists(PROJECT_ROOT):
+                os.chdir(PROJECT_ROOT)
+                logger.info(f"📂 Changed working directory to: {os.getcwd()}")
+            else:
+                return f"❌ Error: Path '{PROJECT_ROOT}' does not exist."
+
+        # 1. Check Dirty
+        # ใช้ shell=True ใน Windows บางครั้งช่วยแก้ปัญหาหา git ไม่เจอ แต่ระวังเรื่อง security (ใน local ไม่เป็นไร)
+        status = subprocess.check_output("git status --porcelain", shell=True, text=True).strip()
+        if status:
+            return f"❌ ABORT: Workspace is dirty (uncommitted changes). Please commit or stash them first.\n\n{status}"
+
+        # 2. Checkout Base & Pull
+        subprocess.run(f"git checkout {base_branch}", shell=True, check=True, capture_output=True)
+        pull_result = subprocess.run(f"git pull origin {base_branch}", shell=True, capture_output=True, text=True)
+
+        if pull_result.returncode != 0:
+            logger.warning(f"⚠️ Git Pull Warning: {pull_result.stderr}")
+
+        # 3. Create & Checkout New Branch (-B เพื่อ reset ถ้าชื่อซ้ำ)
+        subprocess.run(f"git checkout -B {branch_name}", shell=True, check=True, capture_output=True)
+
+        return f"✅ Workspace Initialized:\n- Location: {os.getcwd()}\n- Cleaned & Synced '{base_branch}'\n- Switched to new branch '{branch_name}'\n- Ready to code."
+
+    except subprocess.CalledProcessError as e:
+        return f"❌ Git Error: {e}"
+    except Exception as e:
+        return f"❌ Error initializing workspace: {e}"
+
 # ----------------------------------------------------
 # รวม Tools ทั้งหมดไว้ที่เดียว
 # ----------------------------------------------------
 # ✅ แก้ตรงนี้: ใส่ Type Hint : Dict[str, Any] เพื่อบอก IDE ว่า "อย่าเรื่องมาก รับได้หมด"
 TOOLS: Dict[str, Any] = {
-    # File Tools เดิม
     "list_files": list_files,
     "read_file": read_file,
     "write_file": write_file,
     "generate_skeleton": generate_skeleton,
+    "init_workspace": init_workspace, # ✅ เพิ่มตรงนี้
 }
 
 if GIT_ENABLED:
@@ -47,27 +96,24 @@ if GIT_ENABLED:
 
 SYSTEM_PROMPT = """
 You are an AI Developer Agent (Qwen). 
-Your responsibilities include implementing features, fixing bugs, AND managing version control (Git).
+Your goal is to implement features safely using Git version control.
 
-You have access to the following tools:
-1. File Operations: 
-   - list_files(directory=".")
-   - read_file(file_path)
-   - write_file(file_path, content)
-2. Git Operations: 
-   - git_new_branch(branch_name)
-   - git_commit(message)
-   - git_push(branch_name)
-   - git_status()
+*** SAFETY PROTOCOL ***
+1. START EVERY TASK by using `init_workspace(branch_name="...")`.
+   - Do NOT edit files on 'main' or 'master'.
+   - Do NOT start coding until you successfully enter a new branch.
+2. If `init_workspace` fails (e.g., dirty repo), STOP and report to the user.
 
-GUIDELINES:
-- Always check `list_files` or `git_status` first to understand the context.
-- When starting a new task, CREATE A NEW BRANCH first (unless instructed otherwise).
-- After finishing the code, ALWAYS COMMIT your changes with a descriptive message.
-- If the user asks to "Finish" or "Save", push the code to remote.
-- Think step-by-step.
+TOOLS AVAILABLE:
+1. init_workspace(branch_name, base_branch="main") -> Use this FIRST.
+2. list_files(directory=".")
+3. read_file(file_path)
+4. write_file(file_path, content)
+5. git_commit(message)
+6. git_push(branch_name)
+7. task_complete(summary)
 
-RESPONSE FORMAT EXAMPLES:
+RESPONSE FORMAT (JSON ONLY):
 
 Example 1: List files
 {
