@@ -45,11 +45,10 @@ logger = logging.getLogger("DevAgent")
 def init_workspace(branch_name: str, base_branch: str = "main") -> str:
     """
     Sandbox Setup:
-    1. Check if AGENT_WORKSPACE exists.
-    2. If not, CLONE from MAIN_REPO_PATH.
-    3. If exists, Pull latest changes.
-    4. Switch directory to AGENT_WORKSPACE (Isolation).
-    5. Create/Checkout feature branch.
+    1. Check/Create Sandbox.
+    2. Clone/Pull.
+    3. Configure Git Identity (Fix for 'Please tell me who you are').
+    4. Checkout Branch.
     """
     try:
         # 1. สร้างโฟลเดอร์ Workspace ถ้ายังไม่มี
@@ -57,26 +56,30 @@ def init_workspace(branch_name: str, base_branch: str = "main") -> str:
             logger.info(f"📂 Creating Sandbox at: {AGENT_WORKSPACE}")
             os.makedirs(AGENT_WORKSPACE, exist_ok=True)
 
-            # Clone จาก Repo หลักมา (Local Clone เร็วมาก)
             logger.info("⚡ Cloning from main repo...")
             subprocess.run(f'git clone "{MAIN_REPO_PATH}" .', shell=True, cwd=AGENT_WORKSPACE, check=True)
 
-        # 2. 🚀 ย้ายตัว Agent ไปสิงสถิตที่ Sandbox (สำคัญมาก!)
+        # 2. 🚀 ย้ายตัว Agent ไปสิงสถิตที่ Sandbox
         os.chdir(AGENT_WORKSPACE)
         logger.info(f"📍 Agent switched to: {os.getcwd()}")
 
-        # 3. เคลียร์ Workspace ให้สะอาด & อัปเดต
-        # Fetch ล่าสุดจาก Origin (ซึ่งคือ MAIN_REPO_PATH ของเรา)
+        # -------------------------------------------------------
+        # ✅ FIX: ตั้งค่าตัวตนให้ Git (ไม่งั้น Commit ไม่ได้)
+        # -------------------------------------------------------
+        subprocess.run('git config user.name "AI Dev Agent"', shell=True, check=True)
+        subprocess.run('git config user.email "ai_agent@local.dev"', shell=True, check=True)
+
+        # 3. เคลียร์ Workspace & อัปเดต
         subprocess.run(f"git fetch origin", shell=True, check=True, capture_output=True)
 
-        # Checkout ไปที่ Base Branch ก่อน
+        # Checkout Base
         subprocess.run(f"git checkout {base_branch}", shell=True, check=True, capture_output=True)
         subprocess.run(f"git pull origin {base_branch}", shell=True, capture_output=True)
 
-        # 4. สร้าง Branch ใหม่สำหรับงานนี้
+        # 4. สร้าง Branch ใหม่
         subprocess.run(f"git checkout -B {branch_name}", shell=True, check=True, capture_output=True)
 
-        return f"✅ Sandbox Initialized:\n- Location: {AGENT_WORKSPACE}\n- Synced with Main Repo\n- On Branch: '{branch_name}'\n- SAFE to code here (Isolated)."
+        return f"✅ Sandbox Initialized:\n- Location: {AGENT_WORKSPACE}\n- User: AI Dev Agent\n- Branch: '{branch_name}'\n- Ready to code."
 
     except subprocess.CalledProcessError as e:
         return f"❌ Git Error: {e}"
