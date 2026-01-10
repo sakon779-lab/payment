@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import os  # ✅ ต้องมีตัวนี้ครับ ไม่งั้น os.chdir พังแน่นอน
 import subprocess
 from typing import Dict, Any, Optional, List
 
@@ -27,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DevAgent")
 
 # ✅ เพิ่มบรรทัดนี้ครับ! ไม่งั้นฟังก์ชัน init_workspace จะพังเพราะหาตัวแปรไม่เจอ
-PROJECT_ROOT = "D:\WorkSpace"
+PROJECT_ROOT = "D:\\WorkSpace"
 # หรือใส่ Path เต็ม เช่น: PROJECT_ROOT = r"D:\Project\PaymentBlockChain"
 
 # ----------------------------------------------------
