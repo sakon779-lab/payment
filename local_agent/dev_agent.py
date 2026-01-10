@@ -6,16 +6,16 @@ import os
 import shutil
 from typing import Dict, Any, Optional, List
 
-# ... (Imports เครื่องมือ local_agent อื่นๆ เหมือนเดิม) ...
+# Import LLM Client
 from local_agent.llm_client import query_qwen
-from local_agent.tools.file_ops import list_files, read_file, write_file
+
+# ❌ เราจะไม่ใช้ file_ops จากภายนอก เพื่อบังคับให้มันทำงานใน Sandbox Path เท่านั้น
+# from local_agent.tools.file_ops import list_files, read_file, write_file
 from local_agent.tools.code_analysis import generate_skeleton
 
-# ... (Imports Git Ops เหมือนเดิม) ...
+# Import Git Ops
 try:
     from graph.tools.git_ops import (
-        git_create_branch,
-        git_commit_changes,
         git_push_to_remote,
         git_status
     )
@@ -28,63 +28,107 @@ except ImportError:
 # ==============================================================================
 # 📍 CONFIGURATION
 # ==============================================================================
-# 1. โฟลเดอร์งานหลักของคุณ (ต้นฉบับ)
+# 1. โฟลเดอร์งานหลัก (Source)
 MAIN_REPO_PATH = r"D:\Project\PaymentBlockChain"
 
-# 2. โฟลเดอร์ที่ให้ Agent ไปวิ่งเล่น (Sandbox)
-# ** ต้องเป็นคนละโฟลเดอร์กับข้างบน **
+# 2. โฟลเดอร์ Sandbox (Target)
 AGENT_WORKSPACE = r"D:\WorkSpace\PaymentBlockChain_Agent"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DevAgent")
 
 
-# ----------------------------------------------------
-# 🆕 New Tool: Init Workspace Logic (Sandbox Mode)
-# ----------------------------------------------------
+# ==============================================================================
+# 🛠️ LOCAL FILE TOOLS (Override เพื่อบังคับใช้ Path ใน Sandbox)
+# ==============================================================================
+def list_files(directory: str = ".") -> str:
+    """List files in the current sandbox directory."""
+    try:
+        files = []
+        for root, _, filenames in os.walk(directory):
+            if ".git" in root: continue
+            for filename in filenames:
+                files.append(os.path.relpath(os.path.join(root, filename), directory))
+        if not files: return "No files found."
+        return "\n".join(files[:50])
+    except Exception as e:
+        return f"Error listing files: {e}"
+
+
+def read_file(file_path: str) -> str:
+    """Read file content from current sandbox."""
+    try:
+        if not os.path.exists(file_path):
+            return f"Error: File '{file_path}' not found in {os.getcwd()}"
+        with open(file_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error reading file: {e}"
+
+
+def write_file(file_path: str, content: str) -> str:
+    """Write content to file in current sandbox."""
+    try:
+        directory = os.path.dirname(file_path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"✅ File written: {file_path} (in {os.getcwd()})"
+    except Exception as e:
+        return f"Error writing file: {e}"
+
+
+# ==============================================================================
+# 🛡️ SANDBOX & GIT TOOLS
+# ==============================================================================
 def init_workspace(branch_name: str, base_branch: str = "main") -> str:
     """
-    Sandbox Setup:
-    1. Check/Create Sandbox.
-    2. Clone/Pull.
-    3. Configure Git Identity (Fix for 'Please tell me who you are').
-    4. Checkout Branch.
+    Sandbox Setup: Clone -> Config Identity -> Checkout
     """
     try:
-        # 1. สร้างโฟลเดอร์ Workspace ถ้ายังไม่มี
+        # 1. Create/Clone Sandbox
         if not os.path.exists(AGENT_WORKSPACE):
             logger.info(f"📂 Creating Sandbox at: {AGENT_WORKSPACE}")
             os.makedirs(AGENT_WORKSPACE, exist_ok=True)
-
             logger.info("⚡ Cloning from main repo...")
             subprocess.run(f'git clone "{MAIN_REPO_PATH}" .', shell=True, cwd=AGENT_WORKSPACE, check=True)
 
-        # 2. 🚀 ย้ายตัว Agent ไปสิงสถิตที่ Sandbox
+        # 2. Switch Context
         os.chdir(AGENT_WORKSPACE)
         logger.info(f"📍 Agent switched to: {os.getcwd()}")
 
-        # -------------------------------------------------------
-        # ✅ FIX: ตั้งค่าตัวตนให้ Git (ไม่งั้น Commit ไม่ได้)
-        # -------------------------------------------------------
+        # 3. Config Identity (Fix 'who are you' error)
         subprocess.run('git config user.name "AI Dev Agent"', shell=True, check=True)
         subprocess.run('git config user.email "ai_agent@local.dev"', shell=True, check=True)
 
-        # 3. เคลียร์ Workspace & อัปเดต
-        subprocess.run(f"git fetch origin", shell=True, check=True, capture_output=True)
-
-        # Checkout Base
+        # 4. Sync & Checkout
+        subprocess.run("git fetch origin", shell=True, check=True, capture_output=True)
         subprocess.run(f"git checkout {base_branch}", shell=True, check=True, capture_output=True)
         subprocess.run(f"git pull origin {base_branch}", shell=True, capture_output=True)
-
-        # 4. สร้าง Branch ใหม่
         subprocess.run(f"git checkout -B {branch_name}", shell=True, check=True, capture_output=True)
 
-        return f"✅ Sandbox Initialized:\n- Location: {AGENT_WORKSPACE}\n- User: AI Dev Agent\n- Branch: '{branch_name}'\n- Ready to code."
+        return f"✅ Sandbox Initialized: Branch '{branch_name}' created from '{base_branch}'."
 
-    except subprocess.CalledProcessError as e:
-        return f"❌ Git Error: {e}"
     except Exception as e:
         return f"❌ Error initializing sandbox: {e}"
+
+
+def git_commit_wrapper(message: str) -> str:
+    """Wrapper to handle 'nothing to commit' gracefully."""
+    try:
+        subprocess.run("git add .", shell=True, check=True)
+        result = subprocess.run(f'git commit -m "{message}"', shell=True, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return f"✅ Commit Success: {message}"
+        else:
+            msg = result.stderr + result.stdout
+            if "nothing to commit" in msg:
+                return "⚠️ Warning: Nothing to commit (Did you write any files?)"
+            return f"❌ Commit Failed: {msg}"
+    except Exception as e:
+        return f"❌ Git Error: {e}"
 
 
 # ----------------------------------------------------
@@ -96,31 +140,28 @@ TOOLS: Dict[str, Any] = {
     "write_file": write_file,
     "generate_skeleton": generate_skeleton,
     "init_workspace": init_workspace,
+    "git_commit": git_commit_wrapper,  # Use wrapper
 }
 
 if GIT_ENABLED:
     TOOLS.update({
-        "git_commit": git_commit_changes,
         "git_push": git_push_to_remote,
         "git_status": git_status
     })
 
 # ----------------------------------------------------
-# System Prompt (เน้นย้ำเรื่อง Sandbox)
+# System Prompt (Detailed Examples Preserved)
 # ----------------------------------------------------
 SYSTEM_PROMPT = """
 You are an AI Developer Agent (Qwen). 
 Your goal is to implement features safely using Git in an ISOLATED SANDBOX.
 
-*** CRITICAL RULES - READ CAREFULLY ***
+*** CRITICAL RULES ***
 1. **FIRST STEP IS ALWAYS** `init_workspace(branch_name="...")`.
    - Do NOT do anything else before this.
-   - Do NOT assume the workspace is ready.
-2. **DO NOT USE `task_complete` IMMEDIATELY.**
-   - You MUST perform actions: `list_files` -> `read_file` -> `write_file` -> `git_commit`.
-   - If you don't know which file to edit, use `list_files` to look around.
-3. **ACTUAL CODING REQUIRED.**
-   - Do not just say you refactored. You must use `write_file` to actually change the code.
+2. **ACTUAL CODING REQUIRED.**
+   - Use `write_file` to actually change the code.
+   - Do not use `task_complete` until you have committed changes.
 
 TOOLS AVAILABLE:
 1. init_workspace(branch_name, base_branch="main") -> MUST USE FIRST.
@@ -129,22 +170,54 @@ TOOLS AVAILABLE:
 4. write_file(file_path, content)
 5. git_commit(message)
 6. git_push(branch_name)
-7. task_complete(summary) -> ONLY after work is done.
+7. task_complete(summary)
 
 RESPONSE FORMAT (JSON ONLY):
 
-Example:
+Example 1: Initialize Workspace (Start Task)
 {
   "action": "init_workspace",
-  "args": { "branch_name": "feature/sandbox-test" }
+  "args": {
+    "branch_name": "feature/login-fix"
+  }
 }
 
-Remember: Output ONLY JSON blocks.
+Example 2: List files
+{
+  "action": "list_files",
+  "args": {
+    "directory": "."
+  }
+}
+
+Example 3: Write a file
+{
+  "action": "write_file",
+  "args": {
+    "file_path": "utils/helper.py",
+    "content": "def hello():\\n    print('Hello World')"
+  }
+}
+
+Example 4: Commit Changes
+{
+  "action": "git_commit",
+  "args": {
+    "message": "Added helper function"
+  }
+}
+
+Example 5: Finish task
+{
+  "action": "task_complete",
+  "args": {
+    "summary": "Initialized workspace, created helper.py, and committed changes."
+  }
+}
+
+Remember: ALWAYS respond with a JSON block like the examples above.
 """
 
-
-# ... (ส่วน _extract_all_jsons, execute_tool_dynamic, run_dev_agent_task เหมือนเดิม ไม่ต้องแก้) ...
-# (แต่ต้องมี _extract_all_jsons ตัวที่ใช้ JSONDecoder ล่าสุดนะ)
 
 def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
     """ แกะ JSON แบบอัจฉริยะ (ใช้ Decoder ของ Python เอง) """
@@ -189,8 +262,8 @@ def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
         logger.info(f"🔄 Step {step + 1}/{max_steps}...")
         response = query_qwen(history)
 
-        log_resp = response[:100] + "..." if len(response) > 100 else response
-        logger.info(f"🤖 AI Response: {log_resp}")
+        # Log สั้นๆ
+        logger.info(f"🤖 AI Response: {response[:100]}...")
 
         tool_calls = _extract_all_jsons(response)
 
@@ -215,9 +288,14 @@ def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
             result = execute_tool_dynamic(action, args)
             step_outputs.append(f"Tool Output ({action}):\n{result}")
 
+            # Safety Check
             if action == "init_workspace" and "❌" in result:
                 logger.error("🛑 Init failed! Stopping task.")
                 return f"FAILED: {result}"
+
+            # Log Success
+            if "✅" in result:
+                logger.info(f"✨ SUCCESS: {result}")
 
         if task_finished:
             logger.info(f"✅ Task Completed: {final_summary}")
