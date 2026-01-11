@@ -4,25 +4,15 @@ import re
 import subprocess
 import os
 import shutil
+import ast
 from typing import Dict, Any, Optional, List
+from dotenv import load_dotenv
 
 # Import LLM Client
 from local_agent.llm_client import query_qwen
 
-# ✅ Import เครื่องมือเดิม (ไม่ต้องเขียนใหม่)
+# ✅ IMPORT 1: Code Analysis Tool (Wrapper จะเรียกใช้ตัวนี้)
 from local_agent.tools.code_analysis import generate_skeleton as original_skeleton
-
-# Import Git Ops
-try:
-    from graph.tools.git_ops import (
-        git_push_to_remote,
-        git_status
-    )
-
-    GIT_ENABLED = True
-except ImportError:
-    logging.warning("⚠️ Could not import git_ops. Git capabilities disabled.")
-    GIT_ENABLED = False
 
 # ==============================================================================
 # 📍 CONFIGURATION
@@ -30,29 +20,57 @@ except ImportError:
 MAIN_REPO_PATH = r"D:\Project\PaymentBlockChain"
 AGENT_WORKSPACE = r"D:\WorkSpace\PaymentBlockChain_Agent"
 
+# ==============================================================================
+# 🔑 SECURITY & ENVIRONMENT SETUP (แก้ปัญหา Sandbox หา Config ไม่เจอ)
+# ==============================================================================
+# ✅ 2. สั่งโหลด .env จาก MAIN_REPO_PATH โดยตรง
+# ไม่ว่า Agent จะย้ายไปโฟลเดอร์ไหน ค่านี้จะยังอยู่ใน Memory
+env_path = os.path.join(MAIN_REPO_PATH, ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+    logging.info(f"✅ Loaded environment variables from: {env_path}")
+else:
+    logging.warning(f"⚠️ .env file not found at: {env_path}")
+
+# ตรวจสอบว่ามีค่า JIRA หรือไม่ (ถ้าไม่มี ให้ Set default หรือแจ้งเตือน)
+if not os.getenv("JIRA_URL"):
+    # กรณี User ไม่ได้ใส่ใน .env เราสามารถ Override ชั่วคราวตรงนี้ได้ (แต่ไม่แนะนำ)
+    # os.environ["JIRA_URL"] = "..."
+    logging.error("❌ JIRA_URL is missing in .env!")
+
+# ==============================================================================
+# 🧩 IMPORT GRAPH TOOLS (ที่ต้องการ Environment Variable)
+# ==============================================================================
+try:
+    # Import หลังจาก load_dotenv แล้ว เพื่อให้ Tool อ่านค่าได้ทันที
+    from graph.tools.jira import get_jira_ticket
+    JIRA_ENABLED = True
+except ImportError:
+    logging.warning("⚠️ Could not import graph.tools.jira.")
+    JIRA_ENABLED = False
+
+try:
+    from graph.tools.git_ops import git_push_to_remote, git_status
+    GIT_ENABLED = True
+except ImportError:
+    GIT_ENABLED = False
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DevAgent")
 
 
 # ==============================================================================
-# 🛡️ SANDBOX WRAPPERS (ตัวกลางดักจับ Path)
+# 🛡️ SANDBOX WRAPPERS (ตัวกลางดักจับ Path & Logic)
 # ==============================================================================
 
 def safe_generate_skeleton(file_path: str) -> str:
-    """
-    Wrapper: บังคับให้ generate_skeleton อ่านไฟล์จาก Sandbox เท่านั้น
-    """
+    """Wrapper: บังคับอ่านไฟล์จาก Sandbox เท่านั้น"""
     try:
-        # 1. แปลงเป็น Full Path ใน Sandbox
         full_path = os.path.join(AGENT_WORKSPACE, file_path)
-
-        # 2. เรียกใช้ฟังก์ชันเดิม (Modular)
         return original_skeleton(full_path)
     except Exception as e:
         return f"Error in skeleton wrapper: {e}"
 
-
-# ... (list_files, read_file, write_file แบบ Local Override ยังคงไว้เหมือนเดิม เพื่อความชัวร์เรื่อง Path) ...
 
 def list_files(directory: str = ".") -> str:
     """List files in the sandbox directory."""
@@ -83,30 +101,24 @@ def read_file(file_path: str) -> str:
 
 
 def write_file(file_path: str, content: str) -> str:
-    """Write file to sandbox."""
+    """⚠️ OVERWRITE file in sandbox."""
     try:
         full_path = os.path.join(AGENT_WORKSPACE, file_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"✅ File written: {file_path}"
+        return f"✅ File Overwritten: {file_path}"
     except Exception as e:
         return f"Error: {e}"
 
 
-# ✅ เพิ่มอันนี้: สำหรับต่อท้ายไฟล์ (ปลอดภัย ของเก่าไม่หาย)
 def append_file(file_path: str, content: str) -> str:
-    """
-    APPEND content to the end of the file.
-    Use this for adding new functions/classes without touching existing code.
-    """
+    """✅ APPEND content to file in sandbox."""
     try:
         full_path = os.path.join(AGENT_WORKSPACE, file_path)
-        if not os.path.exists(full_path):
-            return f"Error: File {file_path} does not exist. Use write_file to create it."
-
+        if not os.path.exists(full_path): return f"Error: File not found."
         with open(full_path, "a", encoding="utf-8") as f:
-            f.write("\n\n" + content)  # ขึ้นบรรทัดใหม่ให้สวยงาม
+            f.write("\n\n" + content)
         return f"✅ Appended to: {file_path}"
     except Exception as e:
         return f"Error: {e}"
@@ -156,57 +168,63 @@ def git_commit_wrapper(message: str) -> str:
 # ----------------------------------------------------
 TOOLS: Dict[str, Any] = {
     "list_files": list_files,
-    "generate_skeleton": safe_generate_skeleton,  # ✅ ใช้ Wrapper แทนตัวจริง
+    "generate_skeleton": safe_generate_skeleton,
     "read_file": read_file,
     "write_file": write_file,
-    "append_file": append_file, # ✅ Register Tool ใหม่
+    "append_file": append_file,
     "init_workspace": init_workspace,
     "git_commit": git_commit_wrapper,
 }
+
+# ✅ Register Jira Tool (ถ้า import ผ่าน)
+if JIRA_ENABLED:
+    # Key คือชื่อที่จะให้ AI เรียก, Value คือฟังก์ชันจาก graph.tools.jira
+    TOOLS["read_jira_ticket"] = get_jira_ticket
 
 if GIT_ENABLED:
     TOOLS.update({"git_push": git_push_to_remote, "git_status": git_status})
 
 # ----------------------------------------------------
-# System Prompt (Updated to enforce Analysis First)
+# System Prompt (Jira + Sandbox Workflow)
 # ----------------------------------------------------
 SYSTEM_PROMPT = """
 You are an AI Developer Agent (Qwen). 
-Your goal is to implement features in an ISOLATED SANDBOX.
+Your goal is to implement features in an ISOLATED SANDBOX based on Jira tickets.
 
-*** JUNIOR DEV WORKFLOW ***
-1. **INITIALIZE**: `init_workspace(branch_name="...")`
-2. **EXPLORE**: `list_files()` to understand structure.
-3. **ANALYZE**: `generate_skeleton(file_path)` to see existing logic.
-   - Do NOT guess code. Read the skeleton first!
-4. **IMPLEMENT**: `write_file(file_path, content)`
-5. **SAVE**: `git_commit(message)`
+*** WORKFLOW ***
+1. **UNDERSTAND**: If given a Jira ID (e.g., PAY-123), use `read_jira_ticket` FIRST.
+2. **INIT**: `init_workspace(branch_name="feature/PAY-123-...")`
+3. **EXPLORE**: `list_files()` to find relevant files.
+4. **ANALYZE**: `generate_skeleton(file_path)` to see existing logic.
+   - Use `read_file` ONLY if you need to edit inside a function.
+5. **IMPLEMENT**: 
+   - Use `append_file` for NEW functions/classes.
+   - Use `write_file` to OVERWRITE existing files (requires full content).
+6. **SAVE**: `git_commit(message)`
 
 TOOLS AVAILABLE:
-1. init_workspace(branch_name, base_branch="main")
-2. list_files(directory=".")
-3. generate_skeleton(file_path) -> USAGE: args: {"file_path": "src/main.py"}
-4. read_file(file_path)
-5. write_file(file_path, content) -> ⚠️ OVERWRITES EVERYTHING
-6. append_file(file_path, content) -> ✅ ADDS TO END (SAFER)
-7. git_commit(message)
-8. task_complete(summary)
+1. read_jira_ticket(issue_key) -> Returns Summary & Description
+2. init_workspace(branch_name, base_branch="main")
+3. list_files(directory=".")
+4. generate_skeleton(file_path)
+5. read_file(file_path)
+6. write_file(file_path, content)
+7. append_file(file_path, content)
+8. git_commit(message)
+9. task_complete(summary)
 
 RESPONSE FORMAT (JSON ONLY):
 
-Example 1: Analyze Structure
-{
-  "action": "generate_skeleton",
-  "args": { "file_path": "local_agent/dev_agent.py" }
-}
+Example 1: Read Ticket
+{ "action": "read_jira_ticket", "args": { "issue_key": "PAY-123" } }
 
-Example 2: Write Code
-{
-  "action": "write_file",
-  "args": { "file_path": "utils.py", "content": "def help(): pass" }
-}
+Example 2: Init Workspace
+{ "action": "init_workspace", "args": { "branch_name": "feature/PAY-123-login-fix" } }
 
-Remember: ALWAYS respond with a JSON block.
+Example 3: Analyze
+{ "action": "generate_skeleton", "args": { "file_path": "src/auth.py" } }
+
+Remember: Output ONLY JSON blocks.
 """
 
 
@@ -232,9 +250,13 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
     if tool_name not in TOOLS: return f"Error: Unknown tool '{tool_name}'"
     try:
         func = TOOLS[tool_name]
+        # ✅ รองรับ LangChain Tool (เช่น get_jira_ticket) ที่ต้องใช้ .invoke()
         if hasattr(func, 'invoke'):
+            # LangChain Tools มักรับ Input เป็น dict เดียว หรือ arg แยก
+            # กรณี get_jira_ticket ของคุณรับ issue_key: str
             return str(func.invoke(args))
         else:
+            # Python Function ปกติ
             return str(func(**args))
     except Exception as e:
         return f"Error executing {tool_name}: {e}"

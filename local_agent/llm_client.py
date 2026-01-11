@@ -10,7 +10,7 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 # (จาก Log เก่าคุณใช้ชื่อ model path ยาวๆ แต่ถ้า ollama list ขึ้นว่า qwen3:8b ก็ใช้ตามนั้น)
 # MODEL_NAME = "qwen3:8b"
 # MODEL_NAME = "qwen2.5-coder:1.5b"
-MODEL_NAME = "qwen2.5-coder:1.5b"
+MODEL_NAME = "qwen2.5-coder:7b"
 
 
 
