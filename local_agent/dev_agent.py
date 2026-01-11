@@ -94,6 +94,24 @@ def write_file(file_path: str, content: str) -> str:
         return f"Error: {e}"
 
 
+# ✅ เพิ่มอันนี้: สำหรับต่อท้ายไฟล์ (ปลอดภัย ของเก่าไม่หาย)
+def append_file(file_path: str, content: str) -> str:
+    """
+    APPEND content to the end of the file.
+    Use this for adding new functions/classes without touching existing code.
+    """
+    try:
+        full_path = os.path.join(AGENT_WORKSPACE, file_path)
+        if not os.path.exists(full_path):
+            return f"Error: File {file_path} does not exist. Use write_file to create it."
+
+        with open(full_path, "a", encoding="utf-8") as f:
+            f.write("\n\n" + content)  # ขึ้นบรรทัดใหม่ให้สวยงาม
+        return f"✅ Appended to: {file_path}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def init_workspace(branch_name: str, base_branch: str = "main") -> str:
     """Setup Sandbox: Clone -> Config -> Checkout"""
     try:
@@ -141,6 +159,7 @@ TOOLS: Dict[str, Any] = {
     "generate_skeleton": safe_generate_skeleton,  # ✅ ใช้ Wrapper แทนตัวจริง
     "read_file": read_file,
     "write_file": write_file,
+    "append_file": append_file, # ✅ Register Tool ใหม่
     "init_workspace": init_workspace,
     "git_commit": git_commit_wrapper,
 }
@@ -168,9 +187,10 @@ TOOLS AVAILABLE:
 2. list_files(directory=".")
 3. generate_skeleton(file_path) -> USAGE: args: {"file_path": "src/main.py"}
 4. read_file(file_path)
-5. write_file(file_path, content)
-6. git_commit(message)
-7. task_complete(summary)
+5. write_file(file_path, content) -> ⚠️ OVERWRITES EVERYTHING
+6. append_file(file_path, content) -> ✅ ADDS TO END (SAFER)
+7. git_commit(message)
+8. task_complete(summary)
 
 RESPONSE FORMAT (JSON ONLY):
 
