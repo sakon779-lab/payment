@@ -3,6 +3,7 @@ import logging
 import re
 import subprocess
 import os
+import sys
 import shutil
 import ast
 from typing import Dict, Any, Optional, List
@@ -163,15 +164,53 @@ def git_commit_wrapper(message: str) -> str:
         return f"❌ Git Error: {e}"
 
 
+def run_unit_test(test_path: str) -> str:
+    """
+    Runs a unit test file using pytest within the sandbox.
+    Returns the Output (stdout) and Errors (stderr).
+    """
+    try:
+        # 1. บังคับ Path ให้อยู่ใน Sandbox
+        full_path = os.path.join(AGENT_WORKSPACE, test_path)
+
+        if not os.path.exists(full_path):
+            return f"❌ Error: Test file '{test_path}' not found in Sandbox."
+
+        # 2. เตรียมคำสั่ง Run (ใช้ python -m pytest เพื่อความชัวร์เรื่อง Environment)
+        # เราใช้ cwd=AGENT_WORKSPACE เพื่อให้มันรันเหมือนเรา cd เข้าไปในนั้น
+        command = [sys.executable, "-m", "pytest", full_path]
+
+        # 3. รันคำสั่ง
+        logger.info(f"🧪 Running test: {test_path}...")
+        result = subprocess.run(
+            command,
+            cwd=AGENT_WORKSPACE,  # รันใน Sandbox
+            capture_output=True,  # จับผลลัพธ์
+            text=True  # ขอเป็น String
+        )
+
+        # 4. วิเคราะห์ผล
+        output = result.stdout + result.stderr
+
+        if result.returncode == 0:
+            return f"✅ TESTS PASSED:\n{output}"
+        else:
+            return f"❌ TESTS FAILED (Exit Code {result.returncode}):\n{output}\n\n👉 INSTRUCTION: Analyze the error above and Fix the code."
+
+    except Exception as e:
+        return f"❌ Execution Error: {e}"
+
 # ----------------------------------------------------
 # Tools Registration
 # ----------------------------------------------------
 TOOLS: Dict[str, Any] = {
+    "read_jira_ticket": get_jira_ticket,  # (ถ้า JIRA_ENABLED=True)
     "list_files": list_files,
     "generate_skeleton": safe_generate_skeleton,
     "read_file": read_file,
     "write_file": write_file,
     "append_file": append_file,
+    "run_unit_test": run_unit_test,  # ✅ เพิ่มน้องใหม่ตรงนี้
     "init_workspace": init_workspace,
     "git_commit": git_commit_wrapper,
 }
@@ -188,41 +227,44 @@ if GIT_ENABLED:
 # System Prompt (Jira + Sandbox Workflow)
 # ----------------------------------------------------
 SYSTEM_PROMPT = """
-You are an AI Developer Agent (Qwen). 
-Your goal is to implement features in an ISOLATED SANDBOX based on Jira tickets.
+You are an AI Developer Agent (Qwen) acting as a QA-Minded Engineer.
+Your goal is to implement features in an ISOLATED SANDBOX with a strict **"VERIFY BEFORE COMMIT"** policy.
 
-*** WORKFLOW ***
-1. **UNDERSTAND**: If given a Jira ID (e.g., PAY-123), use `read_jira_ticket` FIRST.
-2. **INIT**: `init_workspace(branch_name="feature/PAY-123-...")`
-3. **EXPLORE**: `list_files()` to find relevant files.
-4. **ANALYZE**: `generate_skeleton(file_path)` to see existing logic.
-   - Use `read_file` ONLY if you need to edit inside a function.
-5. **IMPLEMENT**: 
-   - Use `append_file` for NEW functions/classes.
-   - Use `write_file` to OVERWRITE existing files (requires full content).
-6. **SAVE**: `git_commit(message)`
+*** SELF-HEALING WORKFLOW ***
+1. **UNDERSTAND**: Read Jira Ticket or Task.
+2. **INIT**: `init_workspace(...)`
+3. **EXPLORE & ANALYZE**: `list_files`, `generate_skeleton`.
+4. **IMPLEMENT**: Write Source Code AND **Unit Tests** (using `pytest`).
+5. **VERIFY (Loop)**:
+   - Call `run_unit_test(test_file_path)`.
+   - **IF FAILED (❌)**: Read the error log, ANALYZE why it failed, FIX the source code (or the test), and RUN TEST AGAIN.
+   - **IF PASSED (✅)**: Proceed to Save.
+6. **SAVE**: `git_commit` (Only if tests pass).
+
+*** CRITICAL RULES ***
+- **NEVER COMMIT BROKEN CODE.** Always run tests first.
+- If you write a new feature, you **MUST** write a corresponding `test_*.py` file.
+- If `run_unit_test` returns an error, do NOT give up. Fix it!
 
 TOOLS AVAILABLE:
-1. read_jira_ticket(issue_key) -> Returns Summary & Description
+1. read_jira_ticket(issue_key)
 2. init_workspace(branch_name, base_branch="main")
 3. list_files(directory=".")
 4. generate_skeleton(file_path)
 5. read_file(file_path)
 6. write_file(file_path, content)
 7. append_file(file_path, content)
-8. git_commit(message)
-9. task_complete(summary)
+8. run_unit_test(test_path) -> Returns Pass/Fail logs
+9. git_commit(message)
+10. task_complete(summary)
 
 RESPONSE FORMAT (JSON ONLY):
 
-Example 1: Read Ticket
-{ "action": "read_jira_ticket", "args": { "issue_key": "PAY-123" } }
+Example 1: Run Test
+{ "action": "run_unit_test", "args": { "test_path": "tests/test_login.py" } }
 
-Example 2: Init Workspace
-{ "action": "init_workspace", "args": { "branch_name": "feature/PAY-123-login-fix" } }
-
-Example 3: Analyze
-{ "action": "generate_skeleton", "args": { "file_path": "src/auth.py" } }
+Example 2: Fix Code (after test fail)
+{ "action": "write_file", "args": { "file_path": "src/auth.py", "content": "...fixed code..." } }
 
 Remember: Output ONLY JSON blocks.
 """
@@ -262,7 +304,7 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
         return f"Error executing {tool_name}: {e}"
 
 
-def run_dev_agent_task(task_description: str, max_steps: int = 15) -> str:
+def run_dev_agent_task(task_description: str, max_steps: int = 30) -> str:
     logger.info(f"🚀 Starting Task: {task_description}")
     history = [
         {"role": "system", "content": SYSTEM_PROMPT},

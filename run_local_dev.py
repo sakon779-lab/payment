@@ -29,7 +29,7 @@ def main():
 
     try:
         # 3. ส่งงานให้ Agent (Qwen) ทำ
-        result = run_dev_agent_task(task_description)
+        result = run_dev_agent_task(task_description, max_steps=50)
 
         # 4. แสดงผลลัพธ์
         print("\n" + "=" * 60)
