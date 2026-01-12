@@ -176,20 +176,25 @@ def run_unit_test(test_path: str) -> str:
         if not os.path.exists(full_path):
             return f"❌ Error: Test file '{test_path}' not found in Sandbox."
 
-        # 2. เตรียมคำสั่ง Run (ใช้ python -m pytest เพื่อความชัวร์เรื่อง Environment)
-        # เราใช้ cwd=AGENT_WORKSPACE เพื่อให้มันรันเหมือนเรา cd เข้าไปในนั้น
+        # 2. เตรียมคำสั่ง Run
         command = [sys.executable, "-m", "pytest", full_path]
 
-        # 3. รันคำสั่ง
+        # ✅ 3. (FIX) เพิ่ม PYTHONPATH ให้ Python รู้จักโฟลเดอร์ปัจจุบัน (Sandbox Root)
+        # เพื่อให้ import src.xxx ทำงานได้
+        env = os.environ.copy()
+        env["PYTHONPATH"] = AGENT_WORKSPACE + os.pathsep + env.get("PYTHONPATH", "")
+
+        # 4. รันคำสั่ง
         logger.info(f"🧪 Running test: {test_path}...")
         result = subprocess.run(
             command,
             cwd=AGENT_WORKSPACE,  # รันใน Sandbox
+            env=env,  # 👈 ส่ง environment ที่แก้แล้วเข้าไป
             capture_output=True,  # จับผลลัพธ์
             text=True  # ขอเป็น String
         )
 
-        # 4. วิเคราะห์ผล
+        # 5. วิเคราะห์ผล
         output = result.stdout + result.stderr
 
         if result.returncode == 0:
