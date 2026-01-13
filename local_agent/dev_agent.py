@@ -327,6 +327,15 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 - **NEVER** chain multiple JSON blocks.
 - **NO COMMENTS IN JSON**: Do not use // or # inside the JSON block.
 
+*** JSON FORMATTING RULES (STRICT) ***
+1. **NO COMMENTS**: Do not use // or # inside the JSON block.
+2. **ESCAPE NEWLINES**: When writing file content, you MUST escape newlines as `\\n`. Do NOT put actual line breaks inside the JSON string value.
+3. **SIMPLE DOCSTRINGS**: Avoid complex multi-line docstrings if possible to prevent JSON parsing errors.
+
+*** CODING STANDARDS ***
+1. **ABSOLUTE IMPORTS ONLY**: Always use `from src.utils.math_ops import ...`. **NEVER** use relative imports like `from ..math_ops`.
+2. **TEST LOCATION**: Always place tests in `tests/` folder (e.g., `tests/test_math_ops.py`), NOT in `src/`.
+
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
 You must follow this workflow automatically for EVERY task:
 
