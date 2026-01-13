@@ -127,24 +127,51 @@ def append_file(file_path: str, content: str) -> str:
 
 
 def init_workspace(branch_name: str, base_branch: str = "main") -> str:
-    """Setup Sandbox: Clone -> Config -> Checkout"""
+    """Setup Sandbox: Clone directly from Remote URL -> Config -> Checkout"""
     try:
+        # 🟢 STEP 1: หา GitHub URL จาก Main Repo ก่อน
+        # (เพื่อให้ไม่ต้อง Hardcode URL ใน Agent)
+        try:
+            remote_url = subprocess.check_output(
+                "git config --get remote.origin.url",
+                shell=True,
+                cwd=MAIN_REPO_PATH,
+                text=True
+            ).strip()
+            logger.info(f"🔗 Detected Remote URL: {remote_url}")
+        except Exception as e:
+            return f"❌ Error: Could not detect remote URL from {MAIN_REPO_PATH}. Is it a git repo?"
+
+        # 🟢 STEP 2: Clone จาก GitHub URL ลง Sandbox (Cleanest Way)
         if not os.path.exists(AGENT_WORKSPACE):
             logger.info(f"📂 Creating Sandbox at: {AGENT_WORKSPACE}")
             os.makedirs(AGENT_WORKSPACE, exist_ok=True)
-            subprocess.run(f'git clone "{MAIN_REPO_PATH}" .', shell=True, cwd=AGENT_WORKSPACE, check=True)
+
+            # Clone ตรงจาก GitHub (ใช้ Auth ที่เรา Setup ไว้)
+            logger.info(f"⬇️ Cloning from {remote_url}...")
+            subprocess.run(f'git clone "{remote_url}" .', shell=True, cwd=AGENT_WORKSPACE, check=True)
 
         os.chdir(AGENT_WORKSPACE)
+
+        # ไม่ต้อง set-url แล้ว เพราะ Clone มาจากของจริง Origin ก็จะเป็นของจริงอัตโนมัติ ✅
+
+        # Config User Agent
         subprocess.run('git config user.name "AI Dev Agent"', shell=True, cwd=AGENT_WORKSPACE, check=True)
         subprocess.run('git config user.email "ai_agent@local.dev"', shell=True, cwd=AGENT_WORKSPACE, check=True)
 
+        # Checkout Flow
         subprocess.run(f"git fetch origin", shell=True, cwd=AGENT_WORKSPACE, check=True, capture_output=True)
+
+        # Checkout Base Branch (main) ให้ชัวร์ก่อน
         subprocess.run(f"git checkout {base_branch}", shell=True, cwd=AGENT_WORKSPACE, check=True, capture_output=True)
         subprocess.run(f"git pull origin {base_branch}", shell=True, cwd=AGENT_WORKSPACE, capture_output=True)
+
+        # Create Feature Branch
         subprocess.run(f"git checkout -B {branch_name}", shell=True, cwd=AGENT_WORKSPACE, check=True,
                        capture_output=True)
 
-        return f"✅ Sandbox Ready: Branch '{branch_name}' active."
+        return f"✅ Sandbox Ready: Branch '{branch_name}' created from remote '{base_branch}'."
+
     except Exception as e:
         return f"❌ Init failed: {e}"
 
