@@ -169,24 +169,33 @@ def git_push_wrapper(branch_name: str) -> str:
     try:
         logger.info(f"🚀 Pushing branch {branch_name} to origin...")
 
-        # 1. เช็คก่อนว่ามี Commit หรือยัง?
+        # Check Commits
         has_commits = subprocess.run("git rev-parse --verify HEAD", shell=True, cwd=AGENT_WORKSPACE,
                                      capture_output=True)
         if has_commits.returncode != 0:
-            return "❌ Push Failed: You have NO COMMITS yet. Please run 'git_commit' first!"
+            return "❌ Push Failed: No commits yet."
 
-        # 2. สั่ง Push
+        # Push Command
         cmd = f"git push -u origin {branch_name}"
-        result = subprocess.run(cmd, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True)
+
+        # ✅ เพิ่ม env เพื่อบังคับใช้ gh เป็น credential helper (กันเหนียว)
+        env = os.environ.copy()
+        # env["GCM_CREDENTIAL_STORE"] = "cache" # Optional
+
+        result = subprocess.run(cmd, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True, env=env)
 
         if result.returncode == 0:
             return f"✅ Push Success: {result.stdout}"
         else:
-            # ช่วยแปล Error ให้ AI เข้าใจง่ายขึ้น
-            if "does not match any" in result.stderr:
-                return f"❌ Push Failed: Branch '{branch_name}' does not exist locally. Did you forget to 'git_commit'?"
+            error_msg = result.stderr
+            # 🕵️‍♂️ ดักจับ Authentication Error
+            if "403" in error_msg or "Authentication failed" in error_msg or "logon failed" in error_msg:
+                return f"❌ AUTH ERROR: Git cannot authenticate. Please run 'gh auth setup-git' on the host machine.\nDetails: {error_msg}"
 
-            return f"❌ Push Failed: {result.stderr}"
+            if "does not match any" in error_msg:
+                return f"❌ Push Failed: Branch missing. Commit first?"
+
+            return f"❌ Push Failed: {error_msg}"
 
     except Exception as e:
         return f"❌ Push Error: {e}"
@@ -315,43 +324,37 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 
 *** CRITICAL INSTRUCTION: ONE STEP AT A TIME ***
 - Output **ONLY ONE** JSON action per turn.
-- **NEVER** chain multiple JSON blocks (e.g., do not write_file and read_file in the same response).
-- **NO COMMENTS IN JSON**: Do not use // or # inside the JSON block. It will break the parser.
-- **WAIT** for the tool result before deciding the next step.
+- **NEVER** chain multiple JSON blocks.
+- **NO COMMENTS IN JSON**: Do not use // or # inside the JSON block.
 
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
 You must follow this workflow automatically for EVERY task:
 
-1. **IMPLICIT TDD RULE (The "Green" Law)**:
-   - Whenever you create/modify logic (e.g., `src/foo.py`), you **MUST** create/update `tests/test_foo.py`.
-   - Your tests MUST cover:
-     - ✅ **Happy Path:** Valid inputs expecting success.
-     - ❌ **Edge/Error Cases:** Invalid inputs expecting failures/exceptions.
+1. **IMPLICIT TDD RULE**:
+   - Whenever you create/modify logic, you MUST create/update tests.
+   - Tests MUST cover Positive & Negative cases.
 
-2. **SELF-HEALING LOOP (The "Repair" Law)**:
-   - AFTER writing code & tests, you **MUST** run `run_unit_test`.
-   - **IF FAILED**: You are **FORBIDDEN** to commit.
-     - Analyze the error log.
-     - Fix the source code (or test).
-     - Run `run_unit_test` again.
-     - Repeat until tests pass (GREEN).
+2. **SELF-HEALING LOOP**:
+   - Run `run_unit_test`.
+   - IF FAILED: Fix code/test -> Retry.
+   - You are FORBIDDEN to commit if tests fail.
 
-3. **DELIVERY POLICY (The "Ship" Law)**:
+3. **DELIVERY POLICY**:
    - Only `git_commit` when tests pass.
-   - After commit, you MUST `git_push` to origin.
-   - Finally, `create_pr` to merge into main.
+   - **CRITICAL:** `git_push` MUST be done on the **Current Feature Branch** (NOT 'main').
+   - After `create_pr` returns a success link, you **MUST** immediately call `task_complete`.
 
 *** WORKFLOW STEPS (Execute One-by-One) ***
-1. **UNDERSTAND**: If a Jira Ticket ID is provided, use read_jira_ticket. Otherwise, skip this step and use the Task Description directly.
+1. **UNDERSTAND**: Read Task (or Jira).
 2. **INIT**: `init_workspace(branch_name)`.
 3. **EXPLORE**: `list_files` / `generate_skeleton`.
 4. **CODE**: `write_file` (Source Code).
-5. **TEST**: `write_file` (Unit Tests - Positive & Negative cases).
-6. **VERIFY**: `run_unit_test` -> Loop Fix if needed.
-7. **SAVE**: `git_commit` (Message must be descriptive).
-8. **UPLOAD**: `git_push(branch_name)`.
-9. **PR**: `create_pr(title, body)`.
-   - Body MUST include "Closes [Jira-ID]" and summary.
+5. **TEST**: `write_file` (Unit Tests).
+6. **VERIFY**: `run_unit_test` -> Loop Fix.
+7. **SAVE**: `git_commit`.
+8. **UPLOAD**: `git_push(branch_name)` <--- ⚠️ MUST match the branch from Step 2.
+9. **PR**: `create_pr`.
+10. **FINISH**: `task_complete`.
 
 TOOLS AVAILABLE:
 1. read_jira_ticket(issue_key)
