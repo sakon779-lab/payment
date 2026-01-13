@@ -168,17 +168,28 @@ def git_push_wrapper(branch_name: str) -> str:
     """✅ Pushes the current branch to origin (Sandbox)."""
     try:
         logger.info(f"🚀 Pushing branch {branch_name} to origin...")
-        # ใช้ -u origin เพื่อ set upstream
+
+        # 1. เช็คก่อนว่ามี Commit หรือยัง?
+        has_commits = subprocess.run("git rev-parse --verify HEAD", shell=True, cwd=AGENT_WORKSPACE,
+                                     capture_output=True)
+        if has_commits.returncode != 0:
+            return "❌ Push Failed: You have NO COMMITS yet. Please run 'git_commit' first!"
+
+        # 2. สั่ง Push
         cmd = f"git push -u origin {branch_name}"
         result = subprocess.run(cmd, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True)
 
         if result.returncode == 0:
             return f"✅ Push Success: {result.stdout}"
         else:
+            # ช่วยแปล Error ให้ AI เข้าใจง่ายขึ้น
+            if "does not match any" in result.stderr:
+                return f"❌ Push Failed: Branch '{branch_name}' does not exist locally. Did you forget to 'git_commit'?"
+
             return f"❌ Push Failed: {result.stderr}"
+
     except Exception as e:
         return f"❌ Push Error: {e}"
-
 
 def create_pr_wrapper(title: str, body: str) -> str:
     """✅ Creates a Pull Request using GitHub CLI (gh) from Sandbox."""
@@ -293,7 +304,7 @@ if JIRA_ENABLED:
     TOOLS["read_jira_ticket"] = get_jira_ticket
 
 if GIT_ENABLED:
-    TOOLS.update({"git_push": git_push_to_remote, "git_status": git_status})
+    TOOLS.update({"git_status": git_status})
 
 # ----------------------------------------------------
 # System Prompt (The Ultimate Edition: QA Mindset + Delivery)
@@ -305,6 +316,7 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 *** CRITICAL INSTRUCTION: ONE STEP AT A TIME ***
 - Output **ONLY ONE** JSON action per turn.
 - **NEVER** chain multiple JSON blocks (e.g., do not write_file and read_file in the same response).
+- **NO COMMENTS IN JSON**: Do not use // or # inside the JSON block. It will break the parser.
 - **WAIT** for the tool result before deciding the next step.
 
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
