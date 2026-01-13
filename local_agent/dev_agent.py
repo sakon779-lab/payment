@@ -442,32 +442,30 @@ def run_dev_agent_task(task_description: str, max_steps: int = 30) -> str:
 
         print(f"🤖 AI Raw Output: {content}")  # Debug
 
-        # ----------------------------------------
-        # 2. กรอง JSON (Safety Filter)
-        # ----------------------------------------
-        # พยายามหา Block ```json ... ``` อันแรกสุด
-        json_matches = re.findall(r"```json(.*?)```", content, re.DOTALL)
+        # # ----------------------------------------
+        # # 2. กรอง JSON (Safety Filter)
+        # # ----------------------------------------
+        # # พยายามหา Block ```json ... ``` อันแรกสุด
+        # json_matches = re.findall(r"```json(.*?)```", content, re.DOTALL)
+        #
+        # if json_matches:
+        #     # ✅ เจอ JSON! เอาแค่อันแรก (Index 0) - ตัดส่วนเกินทิ้ง
+        #     clean_content = json_matches[0].strip()
+        #     if len(json_matches) > 1:
+        #         logger.warning(f"⚠️ AI sent {len(json_matches)} actions. IGNORING extras to prevent loops.")
+        # else:
+        #     # กรณีไม่ใส่ Markdown หา { } อันแรก
+        #     brace_matches = re.search(r"\{.*\}", content, re.DOTALL)
+        #     if brace_matches:
+        #         clean_content = brace_matches.group(0).strip()
+        #     else:
+        #         clean_content = content
 
-        if json_matches:
-            # ✅ เจอ JSON! เอาแค่อันแรก (Index 0) - ตัดส่วนเกินทิ้ง
-            clean_content = json_matches[0].strip()
-            if len(json_matches) > 1:
-                logger.warning(f"⚠️ AI sent {len(json_matches)} actions. IGNORING extras to prevent loops.")
-        else:
-            # กรณีไม่ใส่ Markdown หา { } อันแรก
-            brace_matches = re.search(r"\{.*\}", content, re.DOTALL)
-            if brace_matches:
-                clean_content = brace_matches.group(0).strip()
-            else:
-                clean_content = content
+        tool_calls = _extract_all_jsons(content)
 
-                # ----------------------------------------
+        # ----------------------------------------
         # 3. Execute Tool
         # ----------------------------------------
-        # ใช้ function ช่วย parse (จะคืนค่ามาเป็น List)
-        tool_calls = _extract_all_jsons(clean_content)
-
-        # ถ้าหา JSON ไม่เจอเลย หรือ Parse ไม่ได้
         if not tool_calls:
             logger.warning("msg: No valid JSON found, treating as thought.")
             history.append({"role": "assistant", "content": content})
@@ -476,7 +474,7 @@ def run_dev_agent_task(task_description: str, max_steps: int = 30) -> str:
         step_outputs = []
         task_finished = False
 
-        # Loop นี้จะรันแค่ 1 รอบ (เพราะเราตัด JSON เหลืออันเดียวแล้ว)
+        # Loop นี้จะรันครบทุก Action ที่ AI ส่งมา (เช่น เขียนเสร็จ -> รันเทสต่อเลย)
         for tool_call in tool_calls:
             action = tool_call.get("action")
             args = tool_call.get("args", {})
@@ -484,14 +482,15 @@ def run_dev_agent_task(task_description: str, max_steps: int = 30) -> str:
             if action == "task_complete":
                 task_finished = True
                 result = args.get("summary", "Done")
+                # ถ้าจบงานแล้ว break เลย ไม่ต้องทำ action ต่อไป (ถ้ามี)
+                step_outputs.append(f"Task Completed: {result}")
                 break
 
             logger.info(f"🔧 Executing Tool: {action}")
             result = execute_tool_dynamic(action, args)
-
             step_outputs.append(f"Tool Output ({action}):\n{result}")
 
-            # Safety Break for Init
+            # Safety Break for Init Failure
             if action == "init_workspace" and "❌" in result:
                 return f"FAILED: {result}"
 
