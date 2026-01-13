@@ -303,8 +303,9 @@ You are "Beta", an Autonomous AI Developer with a built-in QA mindset.
 Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull Request.
 
 *** CRITICAL INSTRUCTION: ONE STEP AT A TIME ***
-- Output ONLY ONE JSON action per turn.
-- WAIT for the tool result before deciding the next step.
+- Output **ONLY ONE** JSON action per turn.
+- **NEVER** chain multiple JSON blocks (e.g., do not write_file and read_file in the same response).
+- **WAIT** for the tool result before deciding the next step.
 
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
 You must follow this workflow automatically for EVERY task:
@@ -395,6 +396,8 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 def run_dev_agent_task(task_description: str, max_steps: int = 30) -> str:
     logger.info(f"🚀 Starting Task: {task_description}")
+
+    # Init History
     history = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": f"Task: {task_description}"}
@@ -402,36 +405,94 @@ def run_dev_agent_task(task_description: str, max_steps: int = 30) -> str:
 
     for step in range(max_steps):
         logger.info(f"🔄 Step {step + 1}/{max_steps}...")
-        response = query_qwen(history)
-        logger.info(f"🤖 AI Response: {response[:100]}...")
 
-        tool_calls = _extract_all_jsons(response)
+        # ----------------------------------------
+        # 1. ส่งให้ AI คิด (ใช้ query_qwen ที่ import มา)
+        # ----------------------------------------
+        # ⚠️ แก้ตรงนี้: ใช้ query_qwen และส่ง history เข้าไป
+        try:
+            # สมมติว่า query_qwen รับ list of messages และ return content string หรือ dict
+            # ปรับตาม implementation จริงของ local_agent.llm_client
+            response_payload = query_qwen(history)
+
+            # ถ้า query_qwen return dict ให้ดึง content ออกมา
+            if isinstance(response_payload, dict):
+                content = response_payload.get('message', {}).get('content', '') or response_payload.get('content', '')
+            else:
+                content = str(response_payload)
+
+        except Exception as e:
+            logger.error(f"❌ LLM Error: {e}")
+            return f"LLM Error: {e}"
+
+        print(f"🤖 AI Raw Output: {content}")  # Debug
+
+        # ----------------------------------------
+        # 2. กรอง JSON (Safety Filter)
+        # ----------------------------------------
+        # พยายามหา Block ```json ... ``` อันแรกสุด
+        json_matches = re.findall(r"```json(.*?)```", content, re.DOTALL)
+
+        if json_matches:
+            # ✅ เจอ JSON! เอาแค่อันแรก (Index 0) - ตัดส่วนเกินทิ้ง
+            clean_content = json_matches[0].strip()
+            if len(json_matches) > 1:
+                logger.warning(f"⚠️ AI sent {len(json_matches)} actions. IGNORING extras to prevent loops.")
+        else:
+            # กรณีไม่ใส่ Markdown หา { } อันแรก
+            brace_matches = re.search(r"\{.*\}", content, re.DOTALL)
+            if brace_matches:
+                clean_content = brace_matches.group(0).strip()
+            else:
+                clean_content = content
+
+                # ----------------------------------------
+        # 3. Execute Tool
+        # ----------------------------------------
+        # ใช้ function ช่วย parse (จะคืนค่ามาเป็น List)
+        tool_calls = _extract_all_jsons(clean_content)
+
+        # ถ้าหา JSON ไม่เจอเลย หรือ Parse ไม่ได้
         if not tool_calls:
-            history.append({"role": "assistant", "content": response})
+            logger.warning("msg: No valid JSON found, treating as thought.")
+            history.append({"role": "assistant", "content": content})
             continue
 
         step_outputs = []
         task_finished = False
 
+        # Loop นี้จะรันแค่ 1 รอบ (เพราะเราตัด JSON เหลืออันเดียวแล้ว)
         for tool_call in tool_calls:
             action = tool_call.get("action")
             args = tool_call.get("args", {})
+
             if action == "task_complete":
                 task_finished = True
+                result = args.get("summary", "Done")
                 break
 
             logger.info(f"🔧 Executing Tool: {action}")
             result = execute_tool_dynamic(action, args)
+
             step_outputs.append(f"Tool Output ({action}):\n{result}")
 
+            # Safety Break for Init
             if action == "init_workspace" and "❌" in result:
                 return f"FAILED: {result}"
 
         if task_finished:
+            print(f"\n✅ TASK COMPLETED: {result}")
             return "SUCCESS"
 
+        # ----------------------------------------
+        # 4. Update History
+        # ----------------------------------------
         combined_output = "\n".join(step_outputs)
-        history.append({"role": "assistant", "content": response})
+
+        # เก็บสิ่งที่ AI ตอบ (clean หรือ raw ก็ได้ แต่ raw ดีกว่าสำหรับ debug context)
+        history.append({"role": "assistant", "content": content})
+
+        # เก็บผลลัพธ์จาก Tool ส่งกลับไปให้ AI รู้
         history.append({"role": "user", "content": combined_output})
 
     return "❌ FAILED: Max steps reached."
