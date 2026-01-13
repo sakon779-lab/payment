@@ -72,6 +72,12 @@ def git_push_to_remote(branch_name: str):
     """Push to origin."""
     return run_git_command(["push", "-u", "origin", branch_name])
 
+# 👇👇👇 เพิ่มฟังก์ชันนี้ต่อจาก git_push_to_remote 👇👇👇
+@tool
+def git_pull_from_remote(branch_name: str = "main"):
+    """Pull latest changes from remote."""
+    # --no-rebase เพื่อความปลอดภัย กัน History พัง
+    return run_git_command(["pull", "origin", branch_name, "--no-rebase"])
 
 @tool
 def create_pull_request(title: str, body: str, branch: str):

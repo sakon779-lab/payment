@@ -252,6 +252,34 @@ def git_push_wrapper(branch_name: str) -> str:
         return f"❌ Push Error: {e}"
 
 
+def git_pull_wrapper(branch_name: str = "main") -> str:
+    """✅ Pulls latest changes from remote to Sandbox."""
+    try:
+        logger.info(f"⬇️ Pulling from origin/{branch_name}...")
+
+        # ใช้ Environment เดิมที่มีอยู่
+        env = os.environ.copy()
+
+        # สั่ง git pull ใน Sandbox (AGENT_WORKSPACE)
+        cmd = f"git pull origin {branch_name} --no-rebase"
+
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=AGENT_WORKSPACE,  # 👈 สำคัญมาก! ต้องระบุ Sandbox Path
+            capture_output=True,
+            text=True,
+            env=env
+        )
+
+        if result.returncode == 0:
+            return f"✅ Pull Success:\n{result.stdout}"
+        else:
+            return f"❌ Pull Failed:\n{result.stderr}"
+
+    except Exception as e:
+        return f"❌ Pull Error: {e}"
+
 def create_pr_wrapper(title: str, body: str) -> str:
     """✅ Creates a Pull Request using GitHub CLI (gh) from Sandbox."""
     if not shutil.which("gh"):
@@ -360,6 +388,7 @@ TOOLS: Dict[str, Any] = {
     # Git Ops Tools
     "git_commit": git_commit_wrapper,
     "git_push": git_push_wrapper,  # 🚀 เพิ่ม
+    "git_pull": git_pull_wrapper,
     "create_pr": create_pr_wrapper,  # 🔀 เพิ่ม
 }
 
@@ -436,8 +465,9 @@ TOOLS AVAILABLE:
 8. run_unit_test(test_path)
 9. git_commit(message)
 10. git_push(branch_name)
-11. create_pr(title, body)
-12. task_complete(summary)
+11. git_pull(branch_name)
+12. create_pr(title, body)
+13. task_complete(summary)
 
 RESPONSE FORMAT (JSON ONLY):
 { "action": "tool_name", "args": { ... } }
