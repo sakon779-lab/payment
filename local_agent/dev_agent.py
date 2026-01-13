@@ -329,7 +329,7 @@ You must follow this workflow automatically for EVERY task:
    - Finally, `create_pr` to merge into main.
 
 *** WORKFLOW STEPS (Execute One-by-One) ***
-1. **UNDERSTAND**: `read_jira_ticket` (if applicable) or Read Task.
+1. **UNDERSTAND**: If a Jira Ticket ID is provided, use read_jira_ticket. Otherwise, skip this step and use the Task Description directly.
 2. **INIT**: `init_workspace(branch_name)`.
 3. **EXPLORE**: `list_files` / `generate_skeleton`.
 4. **CODE**: `write_file` (Source Code).
