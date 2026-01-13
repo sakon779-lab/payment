@@ -126,6 +126,29 @@ def append_file(file_path: str, content: str) -> str:
         return f"Error: {e}"
 
 
+def read_jira_ticket_wrapper(issue_key: str) -> str:
+    """Wrapper: เรียก Jira ของจริง แต่ดักจับ Error เพื่อกัน Loop"""
+    if not JIRA_ENABLED:
+        return "❌ Error: Jira Tool is not configured or failed to import."
+
+    try:
+        # เรียก Tool ของจริง (get_jira_ticket มักจะเป็น LangChain Tool ต้องใช้ .invoke)
+        # ส่ง input ตาม format ที่ tool นั้นต้องการ (เดาว่ารับ dict หรือ str)
+        result = get_jira_ticket.invoke({"issue_key": issue_key})
+
+        result_str = str(result)
+
+        # 🟢 KILL SWITCH: ถ้าหาไม่เจอ ให้ด่ากลับไปเลยว่า "หยุดลอง!"
+        if "not found" in result_str.lower() or "404" in result_str:
+            return (f"❌ Error: Jira Ticket '{issue_key}' NOT FOUND.\n"
+                    f"⚠️ STOP TRYING to read this ticket.\n"
+                    f"👉 ACTION: Use the requirements provided by the user in the task description instead.")
+
+        return result_str
+
+    except Exception as e:
+        return f"❌ Jira Execution Error: {e}"
+
 def init_workspace(branch_name: str, base_branch: str = "main") -> str:
     """Setup Sandbox: Clone directly from Remote URL -> Config -> Checkout"""
     try:
@@ -323,7 +346,7 @@ def run_unit_test(test_path: str) -> str:
 # ----------------------------------------------------
 TOOLS: Dict[str, Any] = {
     # Basic Tools
-    "read_jira_ticket": get_jira_ticket,  # (ถ้าเปิด JIRA)
+    # "read_jira_ticket": get_jira_ticket,  # (ถ้าเปิด JIRA)
     "init_workspace": init_workspace,
     "list_files": list_files,
     "generate_skeleton": safe_generate_skeleton,
@@ -342,8 +365,7 @@ TOOLS: Dict[str, Any] = {
 
 # ✅ Register Jira Tool (ถ้า import ผ่าน)
 if JIRA_ENABLED:
-    # Key คือชื่อที่จะให้ AI เรียก, Value คือฟังก์ชันจาก graph.tools.jira
-    TOOLS["read_jira_ticket"] = get_jira_ticket
+    TOOLS["read_jira_ticket"] = read_jira_ticket_wrapper
 
 if GIT_ENABLED:
     TOOLS.update({"git_status": git_status})

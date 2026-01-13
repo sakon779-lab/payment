@@ -203,47 +203,47 @@ def sync_single_ticket(ticket_key: str) -> str:
 
 
 @mcp.tool()
-def sync_project_batch(project_key: str = "SCRUM", incremental: bool = True, limit: int = 5) -> str:
+def dispatch_task_to_beta(task_description: str) -> str:
     """
-    ACTIONS: Batch Sync tickets.
-    Args:
-        limit: Max tickets to process (Default 5 to prevent timeout).
+    Delegate a long-running software task to 'Beta' Agent (Qwen) in BACKGROUND mode.
+    This tool returns immediately, while Beta works in a separate process.
     """
-    logging.info(f"Tool called: sync_project_batch (Limit: {limit})")
+    logging.info(f"🤖 Dispatching task to Beta (Background): {task_description}")
 
-    jql = ""
-    if incremental:
-        last_sync = _get_last_sync_time()
-        if last_sync:
-            jql = f"project = {project_key} AND updated >= '{last_sync}' ORDER BY updated ASC"
-        else:
-            jql = f"project = {project_key} ORDER BY created DESC"
-    else:
-        jql = f"project = {project_key} ORDER BY created DESC"
+    # ✅ 1. ระบุ Path ของ Python ใน .venv ให้ชัดเจน (แก้ปัญหารันไม่ขึ้น)
+    # สมมติว่าโปรเจกต์อยู่ที่ D:\Project\PaymentBlockChain
+    project_root = r"D:\Project\PaymentBlockChain"
+    venv_python = os.path.join(project_root, ".venv", "Scripts", "python.exe")
+    script_path = os.path.join(project_root, "run_local_dev.py")
+
+    # เช็คความชัวร์ว่ามีไฟล์จริงไหม
+    if not os.path.exists(venv_python):
+        return f"❌ Error: Cannot find Python venv at {venv_python}"
+    if not os.path.exists(script_path):
+        return f"❌ Error: Cannot find script at {script_path}"
+
+    command = [venv_python, script_path, task_description]
 
     try:
-        all_keys = _search_jira_keys(jql, max_fetch=limit)
+        # ✅ 2. ใช้ Popen แทน run (Fire & Forget)
+        # วิธีนี้จะเปิด Process ใหม่แล้วปล่อยมือทันที Claude ไม่ต้องรอ
+        subprocess.Popen(
+            command,
+            cwd=project_root,
+            creationflags=subprocess.CREATE_NEW_CONSOLE  # เปิดหน้าต่างใหม่ให้เห็นกันจะๆ
+        )
+
+        return (
+            "✅ **Task Started Successfully!**\n\n"
+            "Beta Agent is running in a separate console window.\n"
+            "Please wait approx 2-5 minutes for the PR to appear on GitHub.\n"
+            "You can continue with other tasks while Beta is working."
+        )
+
     except Exception as e:
-        return f"❌ Failed to search Jira: {e}"
-
-    if not all_keys:
-        return f"✅ No tickets found matching criteria."
-
-    target_keys = all_keys[:limit]
-    results = [f"🔄 Batch Sync Started ({len(target_keys)} tickets)..."]
-
-    for i, key in enumerate(target_keys, 1):
-        logging.info(f"[{i}/{len(target_keys)}] Processing {key}...")
-        try:
-            status = _run_agent_sync(key)
-            if "Success" in status or "Saved" in status:
-                results.append(f"✅ {key}: Success")
-            else:
-                results.append(f"⚠️ {key}: Check log")
-        except Exception as e:
-            results.append(f"❌ {key}: Failed ({e})")
-
-    return "\n".join(results)
+        error_msg = f"❌ System Error launching Beta Agent: {str(e)}"
+        logging.error(error_msg)
+        return error_msg
 
 
 @mcp.tool()
