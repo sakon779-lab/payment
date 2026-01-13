@@ -360,6 +360,11 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 - **NEVER** chain multiple JSON blocks.
 - **NO COMMENTS IN JSON**: Do not use // or # inside the JSON block.
 
+*** ACTION OVER CHAT (CRITICAL) ***
+- **DO NOT** output code blocks in the chat/explanation text.
+- If you need to write or fix code, you **MUST** use the `write_file` tool.
+- Explanation is NOT implementation. You can only affect the file system via tools.
+
 *** JSON FORMATTING RULES (STRICT) ***
 1. **NO COMMENTS**: Do not use // or # inside the JSON block.
 2. **ESCAPE NEWLINES**: When writing file content, you MUST escape newlines as `\\n`. Do NOT put actual line breaks inside the JSON string value.
