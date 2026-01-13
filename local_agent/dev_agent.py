@@ -5,6 +5,7 @@ import subprocess
 import os
 import sys
 import shutil
+import time
 import ast
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
@@ -200,22 +201,23 @@ def git_push_wrapper(branch_name: str) -> str:
     except Exception as e:
         return f"❌ Push Error: {e}"
 
+
 def create_pr_wrapper(title: str, body: str) -> str:
     """✅ Creates a Pull Request using GitHub CLI (gh) from Sandbox."""
     if not shutil.which("gh"):
-        return "❌ Error: GitHub CLI ('gh') is not installed. Please install it first."
+        return "❌ Error: GitHub CLI ('gh') is not installed."
 
     try:
         logger.info(f"🔀 Creating PR: {title}")
+
+        # 1. รอสักนิดเพื่อให้ GitHub Server รู้ตัวว่ามี Branch ใหม่มาแล้ว
+        time.sleep(3)
 
         # ดึงชื่อ Branch ปัจจุบัน
         current_branch = subprocess.check_output("git branch --show-current", shell=True, cwd=AGENT_WORKSPACE,
                                                  text=True).strip()
 
         # คำสั่ง gh pr create
-        # --base main (หรือ master แล้วแต่ repo คุณ)
-        # --head (branch ปัจจุบัน)
-        # --fill (ใช้ title/body จาก commit ถ้าขี้เกียจใส่) แต่เราใส่เองดีกว่า
         cmd = [
             "gh", "pr", "create",
             "--title", title,
@@ -230,13 +232,17 @@ def create_pr_wrapper(title: str, body: str) -> str:
             cwd=AGENT_WORKSPACE,
             capture_output=True,
             text=True,
-            shell=True  # Windows บางทีต้องการ shell=True สำหรับ gh
+            shell=True
         )
 
         if result.returncode == 0:
             return f"✅ PR Created Successfully!\nLink: {result.stdout.strip()}"
+
+        # 🟢 แก้ไข: ถ้ามี PR อยู่แล้ว ให้ถือว่าผ่าน! (AI จะได้ไม่วนลูป)
         elif "already exists" in result.stderr:
-            return f"⚠️ PR already exists for this branch.\n{result.stderr}"
+            # พยายามดึง Link จาก Error Message (GitHub มักจะบอก URL มาด้วย)
+            return f"✅ PR Success (Already Exists): {result.stderr.strip()}"
+
         else:
             return f"❌ PR Creation Failed:\n{result.stderr}"
 
