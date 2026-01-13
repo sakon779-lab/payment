@@ -2,6 +2,7 @@ import sys
 import os
 import httpx
 import logging
+import subprocess
 from typing import List
 
 # --- 1. SETUP LOGGING ---
@@ -375,25 +376,49 @@ def list_project_files(path: str = "."):
 
 
 # ==========================================
-# 🆕 NEW TOOL: LOCAL DEV AGENT BRIDGE
+# 🆕 UPGRADED TOOL: DISPATCH TO BETA (VIA SUBPROCESS)
 # ==========================================
 
 @mcp.tool()
-def run_local_task(task_description: str) -> str:
+def dispatch_task_to_beta(task_description: str) -> str:
     """
-    Run a software development task on the local machine using the Local Agent (Qwen).
-    Use this tool when the user asks to edit files, list files, or write code locally.
+    Delegate a software development task to the 'Beta' Agent (Qwen).
+    Use this tool to create features, write code, run tests, and create PRs autonomously.
 
     Args:
-        task_description: The description of the task (e.g., "Create a file named hello.py", "List files in project")
+        task_description: The detailed instruction (e.g. "Create FastAPI endpoint for user login", "Fix bug in calculation logic from Jira KEY-123")
     """
-    logging.info(f"🤖 Calling Local Agent: {task_description}")
+    logging.info(f"🤖 Dispatching task to Beta Agent: {task_description}")
+
+    # ⚠️ แก้ Path นี้ให้ตรงกับที่อยู่ไฟล์ run_local_dev.py ของคุณจริงๆ
+    script_path = r"D:\Project\PaymentBlockChain\run_local_dev.py"
+    working_dir = r"D:\Project\PaymentBlockChain"
+
+    command = ["python", script_path, task_description]
+
     try:
-        # เรียกใช้ Agent ที่เราเทสต์ผ่าน
-        result = run_dev_agent_task(task_description)
-        return str(result)
+        # รัน Script และดักจับ Output ทั้งหมด
+        process = subprocess.run(
+            command,
+            cwd=working_dir,
+            capture_output=True,
+            text=True,
+            encoding='utf-8'  # รองรับภาษาไทย
+        )
+
+        output_log = process.stdout
+        error_log = process.stderr
+
+        # ตัด Log ให้สั้นลงหน่อยถ้ามันยาวเกินไป (เอาแค่ 4000 ตัวอักษรท้าย)
+        summary_log = output_log[-4000:] if len(output_log) > 4000 else output_log
+
+        if process.returncode == 0:
+            return f"✅ Beta Agent Finished Successfully!\n\n--- AGENT LOG ---\n{summary_log}"
+        else:
+            return f"❌ Beta Agent Failed (Code {process.returncode}).\n\n--- ERROR LOG ---\n{error_log}\n\n--- STDOUT ---\n{summary_log}"
+
     except Exception as e:
-        error_msg = f"Error executing local task: {str(e)}"
+        error_msg = f"❌ System Error launching Beta Agent: {str(e)}"
         logging.error(error_msg)
         return error_msg
 
