@@ -164,6 +164,65 @@ def git_commit_wrapper(message: str) -> str:
         return f"❌ Git Error: {e}"
 
 
+def git_push_wrapper(branch_name: str) -> str:
+    """✅ Pushes the current branch to origin (Sandbox)."""
+    try:
+        logger.info(f"🚀 Pushing branch {branch_name} to origin...")
+        # ใช้ -u origin เพื่อ set upstream
+        cmd = f"git push -u origin {branch_name}"
+        result = subprocess.run(cmd, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return f"✅ Push Success: {result.stdout}"
+        else:
+            return f"❌ Push Failed: {result.stderr}"
+    except Exception as e:
+        return f"❌ Push Error: {e}"
+
+
+def create_pr_wrapper(title: str, body: str) -> str:
+    """✅ Creates a Pull Request using GitHub CLI (gh) from Sandbox."""
+    if not shutil.which("gh"):
+        return "❌ Error: GitHub CLI ('gh') is not installed. Please install it first."
+
+    try:
+        logger.info(f"🔀 Creating PR: {title}")
+
+        # ดึงชื่อ Branch ปัจจุบัน
+        current_branch = subprocess.check_output("git branch --show-current", shell=True, cwd=AGENT_WORKSPACE,
+                                                 text=True).strip()
+
+        # คำสั่ง gh pr create
+        # --base main (หรือ master แล้วแต่ repo คุณ)
+        # --head (branch ปัจจุบัน)
+        # --fill (ใช้ title/body จาก commit ถ้าขี้เกียจใส่) แต่เราใส่เองดีกว่า
+        cmd = [
+            "gh", "pr", "create",
+            "--title", title,
+            "--body", body,
+            "--base", "main",
+            "--head", current_branch
+        ]
+
+        # run ใน Sandbox
+        result = subprocess.run(
+            cmd,
+            cwd=AGENT_WORKSPACE,
+            capture_output=True,
+            text=True,
+            shell=True  # Windows บางทีต้องการ shell=True สำหรับ gh
+        )
+
+        if result.returncode == 0:
+            return f"✅ PR Created Successfully!\nLink: {result.stdout.strip()}"
+        elif "already exists" in result.stderr:
+            return f"⚠️ PR already exists for this branch.\n{result.stderr}"
+        else:
+            return f"❌ PR Creation Failed:\n{result.stderr}"
+
+    except Exception as e:
+        return f"❌ PR Error: {e}"
+
 def run_unit_test(test_path: str) -> str:
     """
     Runs a unit test file using pytest within the sandbox.
@@ -205,19 +264,27 @@ def run_unit_test(test_path: str) -> str:
     except Exception as e:
         return f"❌ Execution Error: {e}"
 
+
 # ----------------------------------------------------
 # Tools Registration
 # ----------------------------------------------------
 TOOLS: Dict[str, Any] = {
-    "read_jira_ticket": get_jira_ticket,  # (ถ้า JIRA_ENABLED=True)
+    # Basic Tools
+    "read_jira_ticket": get_jira_ticket,  # (ถ้าเปิด JIRA)
+    "init_workspace": init_workspace,
     "list_files": list_files,
     "generate_skeleton": safe_generate_skeleton,
     "read_file": read_file,
     "write_file": write_file,
     "append_file": append_file,
-    "run_unit_test": run_unit_test,  # ✅ เพิ่มน้องใหม่ตรงนี้
-    "init_workspace": init_workspace,
+
+    # QA & Verification Tools
+    "run_unit_test": run_unit_test,  # 🧪 หัวใจสำคัญ
+
+    # Git Ops Tools
     "git_commit": git_commit_wrapper,
+    "git_push": git_push_wrapper,  # 🚀 เพิ่ม
+    "create_pr": create_pr_wrapper,  # 🔀 เพิ่ม
 }
 
 # ✅ Register Jira Tool (ถ้า import ผ่าน)
@@ -229,54 +296,63 @@ if GIT_ENABLED:
     TOOLS.update({"git_push": git_push_to_remote, "git_status": git_status})
 
 # ----------------------------------------------------
-# System Prompt (Professional Edition with SOP)
+# System Prompt (The Ultimate Edition: QA Mindset + Delivery)
 # ----------------------------------------------------
 SYSTEM_PROMPT = """
 You are "Beta", an Autonomous AI Developer with a built-in QA mindset.
-Your goal is to complete Jira tasks with zero bugs.
+Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull Request.
+
+*** CRITICAL INSTRUCTION: ONE STEP AT A TIME ***
+- Output ONLY ONE JSON action per turn.
+- WAIT for the tool result before deciding the next step.
 
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
-You must follow this workflow automatically for EVERY task, even if not explicitly asked:
+You must follow this workflow automatically for EVERY task:
 
-1. **IMPLICIT TDD RULE**:
-   - Whenever you create/modify logic in `src/foo.py`, you **MUST** create/update `tests/test_foo.py`.
+1. **IMPLICIT TDD RULE (The "Green" Law)**:
+   - Whenever you create/modify logic (e.g., `src/foo.py`), you **MUST** create/update `tests/test_foo.py`.
    - Your tests MUST cover:
-     - ✅ **Happy Path:** Valid inputs that expect success (True/Result).
-     - ❌ **Edge/Error Cases:** Invalid inputs that expect failures (False/None/Exception).
+     - ✅ **Happy Path:** Valid inputs expecting success.
+     - ❌ **Edge/Error Cases:** Invalid inputs expecting failures/exceptions.
 
-2. **SELF-HEALING LOOP**:
+2. **SELF-HEALING LOOP (The "Repair" Law)**:
    - AFTER writing code & tests, you **MUST** run `run_unit_test`.
    - **IF FAILED**: You are **FORBIDDEN** to commit.
-     - Analyze the error.
+     - Analyze the error log.
      - Fix the source code (or test).
      - Run `run_unit_test` again.
-     - Repeat until GREEN.
+     - Repeat until tests pass (GREEN).
 
-3. **COMMIT POLICY**:
-   - You can only use `git_commit` when `run_unit_test` returns "PASSED".
-   - Your commit message must be descriptive.
+3. **DELIVERY POLICY (The "Ship" Law)**:
+   - Only `git_commit` when tests pass.
+   - After commit, you MUST `git_push` to origin.
+   - Finally, `create_pr` to merge into main.
 
 *** WORKFLOW STEPS (Execute One-by-One) ***
-1. `read_jira_ticket` (if applicable) OR Read Task.
-2. `init_workspace`.
-3. `list_files` / `generate_skeleton`.
-4. `write_file` (Source Code).
-5. `write_file` (Test Code - Positive & Negative cases).
-6. `run_unit_test`.
-7. (Loop Fix if needed).
-8. `git_commit`.
+1. **UNDERSTAND**: `read_jira_ticket` (if applicable) or Read Task.
+2. **INIT**: `init_workspace(branch_name)`.
+3. **EXPLORE**: `list_files` / `generate_skeleton`.
+4. **CODE**: `write_file` (Source Code).
+5. **TEST**: `write_file` (Unit Tests - Positive & Negative cases).
+6. **VERIFY**: `run_unit_test` -> Loop Fix if needed.
+7. **SAVE**: `git_commit` (Message must be descriptive).
+8. **UPLOAD**: `git_push(branch_name)`.
+9. **PR**: `create_pr(title, body)`.
+   - Body MUST include "Closes [Jira-ID]" and summary.
 
 TOOLS AVAILABLE:
 1. read_jira_ticket(issue_key)
-2. init_workspace(branch_name, base_branch="main")
-3. list_files(directory=".")
+2. init_workspace(branch_name)
+3. list_files(directory)
 4. generate_skeleton(file_path)
 5. read_file(file_path)
 6. write_file(file_path, content)
 7. append_file(file_path, content)
 8. run_unit_test(test_path)
 9. git_commit(message)
-10. task_complete(summary)
+10. git_push(branch_name)
+11. create_pr(title, body)
+12. task_complete(summary)
 
 RESPONSE FORMAT (JSON ONLY):
 { "action": "tool_name", "args": { ... } }
