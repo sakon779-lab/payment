@@ -44,4 +44,35 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # รับ Task จาก Command Line Arguments
+    import sys
+
+    task = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Task: Check system health"
+
+    print(f"🚀 Launching Local Dev Agent...")
+    print(f"📋 Task: {task}")
+    print("=" * 60)
+
+    try:
+        # เรียก Agent ทำงาน
+        # (สมมติว่าฟังก์ชันหลักคุณชื่อ run_dev_agent_task หรือคล้ายกัน)
+        from local_agent.dev_agent import run_dev_agent_task
+
+        result = run_dev_agent_task(task)
+
+        print("\n" + "=" * 60)
+        print(f"✅ FINAL RESULT:\n{result}")
+        print("=" * 60)
+
+    except Exception as e:
+        print("\n" + "!" * 60)
+        print(f"❌ CRITICAL CRASH: {e}")
+        import traceback
+
+        traceback.print_exc()  # ปริ้นท์จุดที่พังออกมาให้หมด
+        print("!" * 60)
+
+    finally:
+        # 🟢 เพิ่มบรรทัดนี้: บังคับให้รอ User กด Enter ก่อนปิดหน้าต่าง
+        print("\nPress ENTER to close this window...")
+        input()

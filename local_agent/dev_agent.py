@@ -369,6 +369,33 @@ def run_unit_test(test_path: str) -> str:
         return f"❌ Execution Error: {e}"
 
 
+def install_package_wrapper(package_name: str) -> str:
+    """✅ Installs a Python package using pip in the current venv."""
+    try:
+        # ป้องกันการติดตั้ง package อันตราย หรือการพิมพ์ผิด
+        if any(char in package_name for char in [";", "&", "|", ">"]):
+            return "❌ Error: Invalid package name."
+
+        logger.info(f"📦 Installing package: {package_name}...")
+
+        # รัน pip install
+        command = [sys.executable, "-m", "pip", "install", package_name]
+
+        result = subprocess.run(
+            command,
+            cwd=AGENT_WORKSPACE,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            return f"✅ Installed '{package_name}' successfully."
+        else:
+            return f"❌ Install Failed:\n{result.stderr}"
+
+    except Exception as e:
+        return f"❌ System Error: {e}"
+
 # ----------------------------------------------------
 # Tools Registration
 # ----------------------------------------------------
@@ -381,6 +408,7 @@ TOOLS: Dict[str, Any] = {
     "read_file": read_file,
     "write_file": write_file,
     "append_file": append_file,
+    "install_package": install_package_wrapper, # 👈 เพิ่มบรรทัดนี้
 
     # QA & Verification Tools
     "run_unit_test": run_unit_test,  # 🧪 หัวใจสำคัญ
@@ -428,6 +456,24 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
 You must follow this workflow automatically for EVERY task:
 
+*** ERROR HANDLING STRATEGY (CRITICAL) ***
+When you encounter `ModuleNotFoundError: No module named 'X'`:
+
+1. **ANALYZE the name 'X'**:
+   - Is it a generic library name (e.g., `requests`, `pandas`, `httpx`, `pytest`)?
+   - OR is it a project-specific path (e.g., `src.models`, `utils.helpers`, `main`)?
+
+2. **EXECUTE the correct fix**:
+   - **CASE A: External Library (e.g., 'httpx')**
+     -> DO NOT create a file named 'httpx.py'.
+     -> ACTION: Call `install_package('httpx')`.
+     -> THEN: Add it to `requirements.txt` using `append_file`.
+
+   - **CASE B: Internal Project Code (e.g., 'src.utils.math')**
+     -> DO NOT modify the test file yet.
+     -> ACTION: Call `write_file` to CREATE the missing implementation file at `src/utils/math.py`.
+     -> THEN: Retry the test.
+
 1. **IMPLICIT TDD RULE**:
    - Whenever you create/modify logic, you MUST create/update tests.
    - Tests MUST cover Positive & Negative cases.
@@ -468,6 +514,7 @@ TOOLS AVAILABLE:
 11. git_pull(branch_name)
 12. create_pr(title, body)
 13. task_complete(summary)
+14. install_package(package_name)
 
 RESPONSE FORMAT (JSON ONLY):
 { "action": "tool_name", "args": { ... } }
