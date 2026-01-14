@@ -501,6 +501,8 @@ When you encounter `ModuleNotFoundError: No module named 'X'`:
    - After `create_pr` returns a success link, you **MUST** immediately call `task_complete`.
 
 *** WORKFLOW STEPS (Execute One-by-One) ***
+*** CONSISTENCY RULE: *** Once you define `branch_name` in Step 2, you MUST use EXACTLY the same name for all future git operations (push/pull). DO NOT create or switch to new branch names mid-task.
+
 1. **UNDERSTAND**: Read Task (or Jira).
 2. **INIT**: `init_workspace(branch_name)`.
 3. **EXPLORE**: `list_files` / `generate_skeleton`.
@@ -508,7 +510,7 @@ When you encounter `ModuleNotFoundError: No module named 'X'`:
 5. **TEST**: `write_file` (Unit Tests).
 6. **VERIFY**: `run_unit_test` -> Loop Fix.
 7. **SAVE**: `git_commit`.
-8. **UPLOAD**: `git_push(branch_name)` <--- ⚠️ MUST match the branch from Step 2.
+8. **UPLOAD**: `git_push(branch_name)` <--- ⚠️ CRITICAL: MUST be exact match of Step 2.
 9. **PR**: `create_pr`.
 10. **FINISH**: `task_complete`.
 
