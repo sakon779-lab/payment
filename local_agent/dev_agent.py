@@ -200,55 +200,107 @@ def init_workspace(branch_name: str, base_branch: str = "main") -> str:
 
 
 def git_commit_wrapper(message: str) -> str:
-    """Commit wrapper."""
+    """Commit wrapper with Context Anchoring."""
     try:
-        status = subprocess.check_output("git status --porcelain", shell=True, cwd=AGENT_WORKSPACE, text=True)
-        if not status: return "⚠️ Warning: Nothing to commit."
+        # 1. หาชื่อ Branch ปัจจุบันก่อน (เพื่อเอาไปย้ำเตือน AI)
+        current_branch = subprocess.check_output(
+            "git branch --show-current",
+            shell=True,
+            cwd=AGENT_WORKSPACE,
+            text=True
+        ).strip()
+
+        # 2. เช็ค Status
+        status = subprocess.check_output(
+            "git status --porcelain",
+            shell=True,
+            cwd=AGENT_WORKSPACE,
+            text=True
+        )
+
+        # ---------------------------------------------------------
+        # จุดเปลี่ยนสำคัญ 1: ถ้าไม่มีอะไรแก้ อย่าตอบแค่ Warning
+        # ให้บอก AI ชัดๆ ว่า "ปลอดภัย" และ "ไปต่อได้เลย"
+        # ---------------------------------------------------------
+        if not status:
+            return (f"⚠️ STATUS: Nothing to commit on branch '{current_branch}'. (Working tree clean). "
+                    f"\n👉 NEXT ACTION: No changes needed. You can proceed directly to 'git_push'.")
+
+        # 3. Add & Commit
         subprocess.run("git add .", shell=True, cwd=AGENT_WORKSPACE, check=True)
-        result = subprocess.run(f'git commit -m "{message}"', shell=True, cwd=AGENT_WORKSPACE, capture_output=True,
-                                text=True)
+
+        # (ระวังเรื่อง Quote ใน message นิดนึง แต่ใช้ท่าเดิมไปก่อน)
+        result = subprocess.run(
+            f'git commit -m "{message}"',
+            shell=True,
+            cwd=AGENT_WORKSPACE,
+            capture_output=True,
+            text=True
+        )
+
         if result.returncode == 0:
-            return f"✅ Commit Success: {message}"
+            # -----------------------------------------------------
+            # จุดเปลี่ยนสำคัญ 2: ย้ำชื่อ Branch ในข้อความ Success
+            # -----------------------------------------------------
+            return f"✅ Commit Success on branch '{current_branch}': {message}"
         else:
-            return f"❌ Commit Failed: {result.stderr}"
+            return f"❌ Commit Failed on branch '{current_branch}': {result.stderr}"
+
     except Exception as e:
         return f"❌ Git Error: {e}"
 
 
 def git_push_wrapper(branch_name: str) -> str:
-    """✅ Pushes the current branch to origin (Sandbox)."""
+    """✅ Pushes the current branch with Context Validation."""
     try:
-        logger.info(f"🚀 Pushing branch {branch_name} to origin...")
-        if branch_name == "main" or branch_name == "master":
+        # 1. 🔍 หาชื่อ Branch ปัจจุบันที่ Checkout อยู่จริง (The Anchor)
+        current_branch = subprocess.check_output(
+            "git branch --show-current",
+            shell=True,
+            cwd=AGENT_WORKSPACE,
+            text=True
+        ).strip()
+
+        logger.info(f"🚀 Request to push '{branch_name}' (Actual Current: '{current_branch}')...")
+
+        # 2. 🛡️ Protection: ห้าม Push Main
+        if branch_name in ["main", "master"]:
             return "❌ ERROR: Pushing directly to 'main' is FORBIDDEN. You must push to a feature branch."
 
-        # Check Commits
+        # 3. 🧠 CONTEXT CHECK (จุดสำคัญที่สุด!)
+        # ถ้า AI พยายาม Push Branch ที่ไม่ได้ Checkout อยู่ ให้เตือนสติทันที
+        if branch_name != current_branch:
+            return (f"❌ CONTEXT ERROR: You are currently checking out branch '{current_branch}', "
+                    f"but you tried to push '{branch_name}'.\n"
+                    f"👉 FIX: You MUST push the current branch. Please call `git_push('{current_branch}')`.")
+
+        # 4. Check Commits
         has_commits = subprocess.run("git rev-parse --verify HEAD", shell=True, cwd=AGENT_WORKSPACE,
                                      capture_output=True)
         if has_commits.returncode != 0:
-            return "❌ Push Failed: No commits yet."
+            return f"❌ Push Failed: No commits yet on branch '{current_branch}'."
 
-        # Push Command
+        # 5. Push Command
         cmd = f"git push -u origin {branch_name}"
 
-        # ✅ เพิ่ม env เพื่อบังคับใช้ gh เป็น credential helper (กันเหนียว)
         env = os.environ.copy()
-        # env["GCM_CREDENTIAL_STORE"] = "cache" # Optional
+        # env["GCM_CREDENTIAL_STORE"] = "cache"
 
         result = subprocess.run(cmd, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True, env=env)
 
         if result.returncode == 0:
-            return f"✅ Push Success: {result.stdout}"
+            # ✅ ย้ำชื่อ Branch ใน Success Message เสมอ
+            return f"✅ Push Success: Pushed '{branch_name}' to origin.\n{result.stdout}"
         else:
             error_msg = result.stderr
-            # 🕵️‍♂️ ดักจับ Authentication Error
+            # 🕵️‍♂️ Error Handling เดิม
             if "403" in error_msg or "Authentication failed" in error_msg or "logon failed" in error_msg:
                 return f"❌ AUTH ERROR: Git cannot authenticate. Please run 'gh auth setup-git' on the host machine.\nDetails: {error_msg}"
 
             if "does not match any" in error_msg:
-                return f"❌ Push Failed: Branch missing. Commit first?"
+                return f"❌ Push Failed: Remote branch issue. Try committing first?"
 
-            return f"❌ Push Failed: {error_msg}"
+            return f"❌ Push Failed on '{branch_name}': {error_msg}"
 
     except Exception as e:
         return f"❌ Push Error: {e}"
@@ -472,24 +524,6 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
 You must follow this workflow automatically for EVERY task:
 
-*** ERROR HANDLING STRATEGY (CRITICAL) ***
-When you encounter `ModuleNotFoundError: No module named 'X'`:
-
-1. **ANALYZE the name 'X'**:
-   - Is it a generic library name (e.g., `requests`, `pandas`, `httpx`, `pytest`)?
-   - OR is it a project-specific path (e.g., `src.models`, `utils.helpers`, `main`)?
-
-2. **EXECUTE the correct fix**:
-   - **CASE A: External Library (e.g., 'httpx')**
-     -> DO NOT create a file named 'httpx.py'.
-     -> ACTION: Call `install_package('httpx')`.
-     -> THEN: Add it to `requirements.txt` using `append_file`.
-
-   - **CASE B: Internal Project Code (e.g., 'src.utils.math')**
-     -> DO NOT modify the test file yet.
-     -> ACTION: Call `write_file` to CREATE the missing implementation file at `src/utils/math.py`.
-     -> THEN: Retry the test.
-
 1. **IMPLICIT TDD RULE**:
    - Whenever you create/modify logic, you MUST create/update tests.
    - Tests MUST cover Positive & Negative cases.
@@ -533,6 +567,31 @@ TOOLS AVAILABLE:
 12. create_pr(title, body)
 13. task_complete(summary)
 14. install_package(package_name)
+
+*** ERROR HANDLING STRATEGY (CRITICAL) ***
+When you encounter `ModuleNotFoundError: No module named 'X'`:
+
+1. **ANALYZE the name 'X'**:
+   - Is it a generic library name (e.g., `requests`, `pandas`, `httpx`, `pytest`)?
+   - OR is it a project-specific path (e.g., `src.models`, `utils.helpers`, `main`)?
+
+2. **EXECUTE the correct fix**:
+   - **CASE A: External Library (e.g., 'httpx')**
+     -> DO NOT create a file named 'httpx.py'.
+     -> ACTION: Call `install_package('httpx')`.
+     -> THEN: Add it to `requirements.txt` using `append_file`.
+
+   - **CASE B: Internal Project Code (e.g., 'src.utils.math')**
+     -> DO NOT modify the test file yet.
+     -> ACTION: Call `write_file` to CREATE the missing implementation file at `src/utils/math.py`.
+     -> THEN: Retry the test.
+
+*** GIT BEHAVIOR RULES ***
+- IF `git_commit` returns "nothing to commit" or "working tree clean":
+  - DO NOT PANIC. This is NOT an error.
+  - It means your code is already saved.
+  - ACTION: Proceed DIRECTLY to `git_push` (or `create_pr`).
+  - DO NOT try to modify files just to make a new commit.
 
 RESPONSE FORMAT (JSON ONLY):
 { "action": "tool_name", "args": { ... } }
