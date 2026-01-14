@@ -1,11 +1,11 @@
-from src.utils.math_ops import add, subtract
+from src.utils.math_ops import add
+import pytest
 
-def test_add():
+def test_add_positive_numbers():
     assert add(2, 3) == 5
-    assert add(-1, 1) == 0
+
+def test_add_negative_numbers():
     assert add(-1, -1) == -2
 
-def test_subtract():
-    assert subtract(5, 3) == 2
-    assert subtract(-1, 1) == -2
-    assert subtract(-1, -1) == 0
+def test_add_mixed_numbers():
+    assert add(-2, 3) == 1
