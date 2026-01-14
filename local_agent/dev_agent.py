@@ -550,7 +550,11 @@ You must follow this workflow automatically for EVERY task:
 7. **SAVE**: `git_commit`.
 8. **UPLOAD**: `git_push(branch_name)` <--- ⚠️ CRITICAL: MUST be exact match of Step 2.
 9. **PR**: `create_pr`.
-10. **FINISH**: `task_complete`.
+10. **SELF-CORRECTION**: Before calling task_complete, you MUST:
+    - Re-read the Jira Ticket requirements.
+    - Verify: Did I implement ALL requirements? (e.g., API endpoints, specific filenames).
+    - Verify: Did I install ALL dependencies?
+    - IF NOT: Go back to Step 4 (CODE).
 
 TOOLS AVAILABLE:
 1. read_jira_ticket(issue_key)
