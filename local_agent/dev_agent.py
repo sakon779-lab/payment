@@ -453,6 +453,18 @@ Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull R
 1. **ABSOLUTE IMPORTS ONLY**: Always use `from src.utils.math_ops import ...`. **NEVER** use relative imports like `from ..math_ops`.
 2. **TEST LOCATION**: Always place tests in `tests/` folder (e.g., `tests/test_math_ops.py`), NOT in `src/`.
 
+*** PYTHON IMPORT RULES (CRITICAL) ***
+1. PROJECT STRUCTURE:
+   - Source code is ALWAYS in `src/` folder (e.g., `src/main.py`).
+   - Tests are in `tests/` folder.
+2. IMPORT PATHS:
+   - When importing code from `tests/`, you MUST use absolute imports with `src.` prefix.
+   - ❌ WRONG: `from main import app`
+   - ✅ RIGHT: `from src.main import app`
+3. TROUBLESHOOTING IMPORT ERRORS:
+   - If you get `ModuleNotFoundError: No module named 'main'`, it means you forgot the `src.` prefix.
+   - FIX IT by changing the import in the TEST file, NOT by moving the source file.
+
 *** YOUR STANDARD OPERATING PROCEDURE (SOP) ***
 You must follow this workflow automatically for EVERY task:
 
