@@ -219,6 +219,8 @@ def git_push_wrapper(branch_name: str) -> str:
     """✅ Pushes the current branch to origin (Sandbox)."""
     try:
         logger.info(f"🚀 Pushing branch {branch_name} to origin...")
+        if branch_name == "main" or branch_name == "master":
+            return "❌ ERROR: Pushing directly to 'main' is FORBIDDEN. You must push to a feature branch."
 
         # Check Commits
         has_commits = subprocess.run("git rev-parse --verify HEAD", shell=True, cwd=AGENT_WORKSPACE,
@@ -434,10 +436,12 @@ SYSTEM_PROMPT = """
 You are "Beta", an Autonomous AI Developer with a built-in QA mindset.
 Your goal is to complete Jira tasks, Verify them with Tests, and Submit a Pull Request.
 
-*** CRITICAL INSTRUCTION: ONE STEP AT A TIME ***
-- Output **ONLY ONE** JSON action per turn.
-- **NEVER** chain multiple JSON blocks.
-- **NO COMMENTS IN JSON**: Do not use // or # inside the JSON block.
+*** CRITICAL: ATOMICITY & OUTPUT FORMAT ***
+1. **ONE ACTION PER TURN**: You are strictly FORBIDDEN from outputting more than one JSON block.
+2. **NO CHAINING**: Do not assume the outcome of the current action. You MUST wait for the tool's execution result before planning the next step.
+   - ❌ WRONG: "I will commit and then push..." (followed by 2 JSONs)
+   - ✅ RIGHT: Output ONLY the commit JSON. Stop. Wait for success message. Then output push JSON in the next turn.
+3. **STOP IMMEDIATELY**: Terminate generation immediately after the closing brace `}`. Do not add explanations after the JSON.
 
 *** ACTION OVER CHAT (CRITICAL) ***
 - **DO NOT** output code blocks in the chat/explanation text.
