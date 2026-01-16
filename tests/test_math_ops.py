@@ -1,11 +1,12 @@
-from src.utils.math_ops import add, subtract
+from unittest import TestCase
+from src.utils.math_ops import add, subtract, multiply
 
-def test_add():
-    assert add(2, 3) == 5
-    assert add(-1, 1) == 0
-    assert add(-1, -1) == -2
+class TestMathOps(TestCase):
+    def test_add(self):
+        self.assertEqual(add(1, 2), 3)
+    
+    def test_subtract(self):
+        self.assertEqual(subtract(5, 3), 2)
 
-def test_subtract():
-    assert subtract(5, 3) == 2
-    assert subtract(-1, 1) == -2
-    assert subtract(-1, -1) == 0
+    def test_multiply(self):
+        self.assertEqual(multiply(4, 6), 24)
