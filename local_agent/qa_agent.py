@@ -1,238 +1,389 @@
-import os
-import subprocess
 import json
-import requests
-import base64
+import logging
+import re
+import subprocess
+import os
 import sys
+import shutil
+import time
+import base64
+import requests
+import ast
+from typing import Dict, Any, Optional, List
+from dotenv import load_dotenv
 
+# Import LLM Client
+try:
+    from local_agent.llm_client import query_qwen
+except ImportError:
+    def query_qwen(history):
+        print("❌ Error: Missing local_agent.llm_client")
+        return "{}"
 
 # ==============================================================================
-# 🛠️ ENV LOADER & CONFIG
+# 📍 CONFIGURATION
 # ==============================================================================
-def load_env():
-    """Loads environment variables from a .env file in the parent directory."""
-    # หา .env ที่ root folder (ถอยออกมา 1 ชั้นจาก local_agent)
-    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-
-    if not os.path.exists(env_path):
-        return
-
-    with open(env_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"): continue
-            if "=" in line:
-                key, value = line.split("=", 1)
-                os.environ[key.strip()] = value.strip().strip("'").strip('"')
-
-
-load_env()
-
-TARGET_REPO_PATH = r"D:\WorkSpace\QaAutomationAgent"
+MAIN_REPO_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AGENT_WORKSPACE = r"D:\WorkSpace\QaAutomationAgent"
 QA_REPO_URL = "https://github.com/sakon779-lab/qa-automation-repo.git"
-OLLAMA_API_URL = "http://localhost:11434/api/chat"
-MODEL_NAME = "qwen2.5-coder:14b"
 
-# Jira Config
+# ==============================================================================
+# 🔑 SECURITY & ENVIRONMENT SETUP
+# ==============================================================================
+env_path = os.path.join(MAIN_REPO_PATH, ".env")
+if os.path.exists(env_path):
+    load_dotenv(env_path)
+    logging.info(f"✅ Loaded environment variables from: {env_path}")
+
 JIRA_BASE_URL = os.getenv("JIRA_URL")
 JIRA_USER_EMAIL = os.getenv("JIRA_EMAIL")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 
-# ==============================================================================
-# 🧠 SYSTEM PROMPT
-# ==============================================================================
-SYSTEM_PROMPT = f"""
-You are "Gamma", a Senior QA Automation Engineer.
-You operate on a separate repository located at: `{TARGET_REPO_PATH}`
-
-Your goal is to manage the **QA Automation Repository** (Robot Framework).
-
-*** WORKFLOW (STRICT ORDER) ***
-1. **ANALYZE**: If User provides a Ticket ID, use `read_jira_ticket`.
-2. **INIT**: `init_workspace(branch_name)`.
-3. **PLAN & CODE**: Plan Isolation (`${{uuid}}`) and Mocking. `write_file` tests.
-4. **VERIFY**: `run_shell_command("robot ...")` (ALWAYS Run locally).
-5. **DELIVERY**: `git_commit`, `git_push`.
-
-TOOLS AVAILABLE:
-read_jira_ticket, init_workspace, git_checkout, git_pull, write_file, 
-read_file, run_shell_command, list_files, git_commit, git_push
-
-RESPONSE FORMAT (JSON ONLY):
-{{ "action": "tool_name", "args": {{ ... }} }}
-"""
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("QAAgent")
 
 
 # ==============================================================================
-# 🛠️ TOOLS IMPLEMENTATION
+# 🛡️ SANDBOX WRAPPERS
 # ==============================================================================
-def run_shell_command(command: str, cwd: str = None) -> str:
-    work_dir = cwd if cwd else TARGET_REPO_PATH
-    if command.startswith("robot") and work_dir == TARGET_REPO_PATH:
-        os.makedirs(os.path.join(work_dir, "results"), exist_ok=True)
-        if "--outputdir" not in command: command = f"{command} --outputdir results"
-
-    print(f"💻 Executing in '{work_dir}': {command}")
+def list_files(directory: str = ".") -> str:
     try:
-        result = subprocess.run(command, shell=True, cwd=work_dir, capture_output=True, text=True, encoding='utf-8')
-        output = result.stdout + "\n" + result.stderr
-        return f"Output:\n{output}" if result.returncode == 0 else f"❌ Failed:\n{output}"
+        target_dir = os.path.join(AGENT_WORKSPACE, directory) if directory != "." else AGENT_WORKSPACE
+        files = []
+        for root, _, filenames in os.walk(target_dir):
+            if ".git" in root or ".venv" in root or "results" in root: continue
+            for filename in filenames:
+                rel_path = os.path.relpath(os.path.join(root, filename), AGENT_WORKSPACE)
+                files.append(rel_path)
+        if not files: return "No files found."
+        files.sort()
+        return f"📂 Project Structure ({len(files)} files):\n" + "\n".join(files[:50])
     except Exception as e:
-        return f"❌ Error: {e}"
+        return f"Error: {e}"
+
+
+def read_file(file_path: str) -> str:
+    try:
+        full_path = os.path.join(AGENT_WORKSPACE, file_path)
+        if not os.path.exists(full_path): return f"Error: File not found."
+        with open(full_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def write_file(file_path: str, content: str) -> str:
+    try:
+        full_path = os.path.join(AGENT_WORKSPACE, file_path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"✅ File Written: {file_path}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def append_file(file_path: str, content: str) -> str:
+    try:
+        full_path = os.path.join(AGENT_WORKSPACE, file_path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "a", encoding="utf-8") as f:
+            f.write("\n\n" + content)
+        return f"✅ Appended to: {file_path}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def read_jira_ticket(issue_key: str) -> str:
-    print(f"🔍 Fetching Jira Ticket: {issue_key}...")
+    logger.info(f"🔍 Fetching Jira Ticket: {issue_key}...")
     if not JIRA_USER_EMAIL or not JIRA_API_TOKEN or not JIRA_BASE_URL:
-        return "⚠️ Jira Config Missing in .env! Please provide details manually."
+        return "⚠️ Jira Config Missing in .env! Please interpret requirements from user input."
 
     url = f"{JIRA_BASE_URL}/rest/api/3/issue/{issue_key}"
     auth_str = f"{JIRA_USER_EMAIL}:{JIRA_API_TOKEN}"
     auth_base64 = base64.b64encode(auth_str.encode()).decode()
     headers = {"Authorization": f"Basic {auth_base64}", "Accept": "application/json"}
-
     try:
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200:
             data = response.json()
             fields = data.get('fields', {})
-            return f"TICKET: {issue_key}\nSUMMARY: {fields.get('summary')}\nDESC: {json.dumps(fields.get('description'))}"
+            return (
+                f"TICKET: {issue_key}\nSUMMARY: {fields.get('summary')}\nDESC: {json.dumps(fields.get('description'))}")
         return f"❌ Ticket {issue_key} not found."
     except Exception as e:
         return f"❌ Connection Error: {e}"
 
 
-def git_action(action, **kwargs):
-    # Simplified wrapper for git tools to keep code short
-    cmd = ""
-    if action == "clone":
-        if os.path.exists(os.path.join(TARGET_REPO_PATH, ".git")): return "✅ Repo exists."
-        os.makedirs(TARGET_REPO_PATH, exist_ok=True)
-        cmd = f"git clone {QA_REPO_URL} ."
-    elif action == "status":
-        cmd = "git status --porcelain"
-    elif action == "pull":
-        cmd = f"git pull origin {kwargs.get('branch', 'main')}"
-    elif action == "checkout":
-        branch = kwargs.get('branch')
-        res = run_shell_command(f"git checkout {branch}")
-        if "error" in res.lower() and kwargs.get('new', False):
-            cmd = f"git checkout -b {branch}"
-        else:
-            return res
-    elif action == "commit":
-        run_shell_command("git add .")
-        cmd = f'git commit -m "{kwargs.get("message")}"'
-    elif action == "push":
-        cmd = f"git push origin {kwargs.get('branch')}"
-
-    if cmd: return run_shell_command(cmd)
-    return "❌ Invalid Git Action"
-
-
-def init_workspace(branch_name: str) -> str:
-    print(f"🚀 Initializing Workspace: {branch_name}")
-    if QA_REPO_URL:
-        res = git_action("clone")
-        if "❌" in res: return res
-
-    status = git_action("status")
-    if status.strip().replace("Output:\n", ""): return "❌ ABORT: Uncommitted changes."
-
-    git_action("checkout", branch="main")
-    git_action("pull", branch="main")
-    git_action("checkout", branch=branch_name, new=True)
-    return f"✅ Workspace Ready on '{branch_name}'"
-
-
-def file_op(action, file_path, content=None, directory="."):
-    full_path = os.path.join(TARGET_REPO_PATH, file_path if file_path else directory)
+# ==============================================================================
+# 🛡️ GIT OPS
+# ==============================================================================
+def init_workspace(branch_name: str, base_branch: str = "main") -> str:
     try:
-        if action == "write":
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            return f"✅ Written: {file_path}"
-        elif action == "read":
-            with open(full_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        elif action == "list":
-            files = []
-            for root, _, filenames in os.walk(full_path):
-                for filename in filenames:
-                    rel = os.path.relpath(os.path.join(root, filename), TARGET_REPO_PATH)
-                    if not rel.startswith((".git", ".venv", "results")): files.append(rel)
-            return "\n".join(files[:30])
+        if not os.path.exists(os.path.join(AGENT_WORKSPACE, ".git")):
+            logger.info(f"📂 Creating QA Sandbox at: {AGENT_WORKSPACE}")
+            os.makedirs(AGENT_WORKSPACE, exist_ok=True)
+            logger.info(f"⬇️ Cloning from {QA_REPO_URL}...")
+            subprocess.run(f'git clone "{QA_REPO_URL}" .', shell=True, cwd=AGENT_WORKSPACE, check=True)
+
+        subprocess.run('git config user.name "AI QA Agent"', shell=True, cwd=AGENT_WORKSPACE, check=True)
+        subprocess.run('git config user.email "qa_agent@local.dev"', shell=True, cwd=AGENT_WORKSPACE, check=True)
+
+        logger.info(f"🔄 Syncing with origin/{base_branch}...")
+        subprocess.run(f"git fetch origin", shell=True, cwd=AGENT_WORKSPACE, check=True, capture_output=True)
+        subprocess.run(f"git checkout {base_branch}", shell=True, cwd=AGENT_WORKSPACE, check=True, capture_output=True)
+        subprocess.run(f"git pull origin {base_branch}", shell=True, cwd=AGENT_WORKSPACE, capture_output=True)
+
+        logger.info(f"🌿 Switching to branch: {branch_name}")
+        subprocess.run(f"git checkout -B {branch_name}", shell=True, cwd=AGENT_WORKSPACE, check=True,
+                       capture_output=True)
+        return f"✅ QA Workspace Ready: Branch '{branch_name}'."
+    except Exception as e:
+        return f"❌ Init failed: {e}"
+
+
+def git_commit_wrapper(message: str) -> str:
+    try:
+        current_branch = subprocess.check_output("git branch --show-current", shell=True, cwd=AGENT_WORKSPACE,
+                                                 text=True).strip()
+        status = subprocess.check_output("git status --porcelain", shell=True, cwd=AGENT_WORKSPACE, text=True)
+        if not status: return f"⚠️ Nothing to commit on '{current_branch}'. Proceed to push."
+        subprocess.run("git add .", shell=True, cwd=AGENT_WORKSPACE, check=True)
+        result = subprocess.run(f'git commit -m "{message}"', shell=True, cwd=AGENT_WORKSPACE, capture_output=True,
+                                text=True)
+        if result.returncode == 0: return f"✅ Commit Success on '{current_branch}': {message}"
+        return f"❌ Commit Failed: {result.stderr}"
+    except Exception as e:
+        return f"❌ Git Error: {e}"
+
+
+def git_push_wrapper(branch_name: str) -> str:
+    try:
+        current_branch = subprocess.check_output("git branch --show-current", shell=True, cwd=AGENT_WORKSPACE,
+                                                 text=True).strip()
+        if branch_name != current_branch: return f"❌ CONTEXT ERROR: You are on '{current_branch}' but tried to push '{branch_name}'."
+        cmd = f"git push -u origin {branch_name}"
+        env = os.environ.copy()
+        result = subprocess.run(cmd, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True, env=env)
+        if result.returncode == 0: return f"✅ Push Success: {branch_name}"
+        return f"❌ Push Failed: {result.stderr}"
+    except Exception as e:
+        return f"❌ Push Error: {e}"
+
+
+def create_pr_wrapper(title: str, body: str) -> str:
+    if not shutil.which("gh"): return "❌ Error: GitHub CLI ('gh') not installed."
+    try:
+        current_branch = subprocess.check_output("git branch --show-current", shell=True, cwd=AGENT_WORKSPACE,
+                                                 text=True).strip()
+        cmd = ["gh", "pr", "create", "--title", title, "--body", body, "--base", "main", "--head", current_branch]
+        result = subprocess.run(cmd, cwd=AGENT_WORKSPACE, capture_output=True, text=True, shell=True)
+        if result.returncode == 0:
+            return f"✅ PR Created: {result.stdout.strip()}"
+        elif "already exists" in result.stderr:
+            return f"✅ PR Already Exists."
+        return f"❌ PR Failed: {result.stderr}"
+    except Exception as e:
+        return f"❌ PR Error: {e}"
+
+
+# ==============================================================================
+# 🧪 TEST TOOLS (Robot Framework)
+# ==============================================================================
+def run_robot_test(test_path: str) -> str:
+    try:
+        full_path = os.path.join(AGENT_WORKSPACE, test_path)
+        if not os.path.exists(full_path): return f"❌ Error: Test file '{test_path}' not found."
+
+        results_dir = os.path.join(AGENT_WORKSPACE, "results")
+        os.makedirs(results_dir, exist_ok=True)
+
+        command = [sys.executable, "-m", "robot", "-d", "results", full_path]
+        logger.info(f"🤖 Running Robot Test: {test_path}...")
+
+        env = os.environ.copy()
+        env["PYTHONPATH"] = AGENT_WORKSPACE + os.pathsep + env.get("PYTHONPATH", "")
+
+        result = subprocess.run(command, cwd=AGENT_WORKSPACE, env=env, capture_output=True, text=True)
+        output = result.stdout + "\n" + result.stderr
+        if result.returncode == 0:
+            return f"✅ ROBOT PASSED:\n{output}"
+        else:
+            return f"❌ ROBOT FAILED:\n{output}\n\n👉 INSTRUCTION: Analyze the failure logs and fix the .robot file."
+    except Exception as e:
+        return f"❌ Execution Error: {e}"
+
+
+def install_package_wrapper(package_name: str) -> str:
+    try:
+        logger.info(f"📦 Installing: {package_name}...")
+        command = [sys.executable, "-m", "pip", "install", package_name]
+        result = subprocess.run(command, cwd=AGENT_WORKSPACE, capture_output=True, text=True)
+        if result.returncode == 0: return f"✅ Installed '{package_name}'."
+        return f"❌ Install Failed: {result.stderr}"
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+def run_shell_command(command: str) -> str:
+    try:
+        logger.info(f"💻 Shell: {command}")
+        result = subprocess.run(command, shell=True, cwd=AGENT_WORKSPACE, capture_output=True, text=True)
+        return f"Output:\n{result.stdout}\n{result.stderr}"
     except Exception as e:
         return f"Error: {e}"
 
 
-# Tool Map
-TOOL_MAP = {
-    "read_jira_ticket": read_jira_ticket,
-    "init_workspace": init_workspace,
-    "git_checkout": lambda branch_name: git_action("checkout", branch=branch_name, new=True),
-    "git_pull": lambda branch_name="main": git_action("pull", branch=branch_name),
-    "git_commit": lambda message: git_action("commit", message=message),
-    "git_push": lambda branch_name: git_action("push", branch=branch_name),
-    "write_file": lambda file_path, content: file_op("write", file_path, content),
-    "read_file": lambda file_path: file_op("read", file_path),
-    "list_files": lambda directory=".": file_op("list", None, directory=directory),
-    "run_shell_command": run_shell_command
+TOOLS: Dict[str, Any] = {
+    "read_jira_ticket": read_jira_ticket, "init_workspace": init_workspace,
+    "list_files": list_files, "read_file": read_file, "write_file": write_file,
+    "append_file": append_file, "run_robot_test": run_robot_test, "run_shell_command": run_shell_command,
+    "install_package": install_package_wrapper, "git_commit": git_commit_wrapper,
+    "git_push": git_push_wrapper, "create_pr": create_pr_wrapper
 }
 
+# ==============================================================================
+# 🧠 SYSTEM PROMPT (Gamma Persona)
+# ==============================================================================
+SYSTEM_PROMPT = """
+You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
+Your goal is to Create, Verify, and Deliver automated tests.
+
+*** CRITICAL: ATOMICITY & FORMAT ***
+1. **ONE ACTION PER TURN**: Strictly ONE JSON block per response.
+2. **NO CHAINING**: Wait for the tool result.
+3. **STOP**: Stop after `}`.
+
+*** IMPORTANT: JSON STRING FORMATTING ***
+- Do NOT use triple quotes (\"\"\") for strings in JSON. This is invalid JSON.
+- For multi-line file content, use `\\n` to escape newlines.
+- Example: "content": "*** Settings ***\\nLibrary RequestsLibrary\\n..."
+
+*** WORKFLOW ***
+1. **UNDERSTAND**: `read_jira_ticket` (if provided) or prompt.
+2. **INIT**: `init_workspace(branch_name)` (prefix `qa/`).
+3. **PLAN & CODE**: `write_file` (.robot).
+4. **VERIFY**: `run_robot_test` -> Fix if failed.
+5. **DELIVERY**: `git_commit` (Only if pass) -> `git_push` -> `create_pr` -> `task_complete`.
+
+TOOLS AVAILABLE:
+read_jira_ticket, init_workspace, list_files, read_file, write_file, append_file,
+run_robot_test, git_commit, git_push, create_pr, install_package, task_complete, run_shell_command
+
+RESPONSE FORMAT (JSON ONLY):
+{ "action": "tool_name", "args": { ... } }
+"""
+
 
 # ==============================================================================
-# 🚀 MAIN AGENT LOOP (Callable Function)
+# 🧩 ROBUST JSON EXTRACTION (The Fix!)
 # ==============================================================================
-def run_qa_agent_task(task_description: str):
-    print(f"📡 Remote QA Agent connecting to: {TARGET_REPO_PATH}")
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": task_description}]
+def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
+    """
+    Extracts JSON actions.
+    FEATURE: Supports Python-style dicts with triple quotes (common LLM error).
+    """
+    results = []
 
-    final_result = ""
-
-    while True:
+    # 1. Try Standard JSON Decoding first (Fast path)
+    decoder = json.JSONDecoder()
+    pos = 0
+    while pos < len(text):
         try:
-            response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "messages": messages, "stream": False},
-                                     timeout=120)
-            ai_msg = response.json()["message"]["content"]
+            search = re.search(r"\{", text[pos:])
+            if not search: break
+            start_index = pos + search.start()
+            obj, end_index = decoder.raw_decode(text, idx=start_index)
+            if isinstance(obj, dict) and "action" in obj:
+                results.append(obj)
+            pos = end_index
+        except:
+            pos += 1
 
-            try:
-                json_str = ai_msg.strip()
-                if "```json" in json_str:
-                    json_str = json_str.split("```json")[1].split("```")[0].strip()
-                elif "```" in json_str:
-                    json_str = json_str.split("```")[1].split("```")[0].strip()
-                tool_call = json.loads(json_str)
-            except:
-                print(f"🤖 AI: {ai_msg}")
-                if "task_complete" in ai_msg.lower() or "mission accomplished" in ai_msg.lower():
-                    final_result = ai_msg
-                    break
-                messages.append({"role": "assistant", "content": ai_msg})
-                continue
+    # 2. If Standard JSON failed, Try Python AST (The 'Dirty' Fix)
+    if not results:
+        try:
+            # Find the largest block that looks like a dict { ... }
+            matches = re.findall(r"(\{.*?\})", text, re.DOTALL)
+            for match in matches:
+                try:
+                    # Clean up common JSON-isms that break python AST
+                    clean_match = match.replace("true", "True").replace("false", "False").replace("null", "None")
+                    obj = ast.literal_eval(clean_match)
+                    if isinstance(obj, dict) and "action" in obj:
+                        results.append(obj)
+                except:
+                    continue
+        except:
+            pass
 
+    return results
+
+
+def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
+    if tool_name not in TOOLS: return f"Error: Unknown tool '{tool_name}'"
+    try:
+        func = TOOLS[tool_name]
+        return str(func(**args))
+    except Exception as e:
+        return f"Error executing {tool_name}: {e}"
+
+
+def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
+    logger.info(f"🚀 Starting QA Task: {task_description}")
+
+    history = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": f"Task: {task_description}"}
+    ]
+
+    for step in range(max_steps):
+        logger.info(f"🔄 Step {step + 1}/{max_steps}...")
+
+        try:
+            response_payload = query_qwen(history)
+            if isinstance(response_payload, dict):
+                content = response_payload.get('message', {}).get('content', '') or response_payload.get('content', '')
+            else:
+                content = str(response_payload)
+        except Exception as e:
+            logger.error(f"❌ LLM Error: {e}")
+            return f"LLM Error: {e}"
+
+        print(f"🤖 AI Output: {content[:100]}...")
+
+        tool_calls = _extract_all_jsons(content)
+
+        if not tool_calls:
+            logger.warning("No valid JSON found, treating as thought.")
+            history.append({"role": "assistant", "content": content})
+            continue
+
+        step_outputs = []
+        task_finished = False
+
+        for tool_call in tool_calls:
             action = tool_call.get("action")
             args = tool_call.get("args", {})
-            print(f"🤖 Action: {action} | Args: {args}")
 
-            if action in TOOL_MAP:
-                try:
-                    result = TOOL_MAP[action](**args)
-                except Exception as e:
-                    result = f"❌ Error: {e}"
-            else:
-                result = f"❌ Unknown tool: {action}"
-
-            print(f"⚙️ Result: {result[:100]}...")
-            messages.append({"role": "assistant", "content": json.dumps(tool_call)})
-            messages.append({"role": "user", "content": f"Result: {result}"})
-
-            if "❌ ABORT" in result:
-                final_result = "Aborted due to error."
+            if action == "task_complete":
+                task_finished = True
+                result = args.get("summary", "Done")
+                step_outputs.append(f"Task Completed: {result}")
                 break
 
-        except Exception as e:
-            return f"❌ Critical Error: {e}"
+            logger.info(f"🔧 Tool: {action}")
+            result = execute_tool_dynamic(action, args)
+            step_outputs.append(f"Tool Output ({action}):\n{result}")
 
-    return final_result
+            if action == "init_workspace" and "❌" in result:
+                return f"FAILED: {result}"
+
+        if task_finished:
+            print(f"\n✅ TASK COMPLETED: {result}")
+            return result
+
+        history.append({"role": "assistant", "content": content})
+        history.append({"role": "user", "content": "\n".join(step_outputs)})
+
+    return "❌ FAILED: Max steps reached."
