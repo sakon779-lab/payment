@@ -190,26 +190,32 @@ def create_pr_wrapper(title: str, body: str) -> str:
 # ==============================================================================
 # 🧪 TEST TOOLS (Robot Framework)
 # ==============================================================================
-def run_robot_test(test_path: str) -> str:
+def run_robot_test(file_path: str) -> str:  # 👈 แก้ชื่อตัวแปรตรงนี้จาก test_path เป็น file_path
+    """Runs a Robot Framework test file."""
     try:
-        full_path = os.path.join(AGENT_WORKSPACE, test_path)
-        if not os.path.exists(full_path): return f"❌ Error: Test file '{test_path}' not found."
+        # แก้ตรงนี้ด้วยให้ใช้ variable ใหม่
+        full_path = os.path.join(AGENT_WORKSPACE, file_path)
+
+        if not os.path.exists(full_path):
+            return f"❌ Error: Test file '{file_path}' not found."  # 👈 แก้ตรงนี้
 
         results_dir = os.path.join(AGENT_WORKSPACE, "results")
         os.makedirs(results_dir, exist_ok=True)
 
         command = [sys.executable, "-m", "robot", "-d", "results", full_path]
-        logger.info(f"🤖 Running Robot Test: {test_path}...")
+        logger.info(f"🤖 Running Robot Test: {file_path}...")  # 👈 แก้ตรงนี้
 
         env = os.environ.copy()
         env["PYTHONPATH"] = AGENT_WORKSPACE + os.pathsep + env.get("PYTHONPATH", "")
 
         result = subprocess.run(command, cwd=AGENT_WORKSPACE, env=env, capture_output=True, text=True)
         output = result.stdout + "\n" + result.stderr
+
         if result.returncode == 0:
             return f"✅ ROBOT PASSED:\n{output}"
         else:
-            return f"❌ ROBOT FAILED:\n{output}\n\n👉 INSTRUCTION: Analyze the failure logs and fix the .robot file."
+            return f"❌ ROBOT FAILED (Exit Code {result.returncode}):\n{output}\n\n👉 INSTRUCTION: Analyze the failure logs above and fix the .robot file."
+
     except Exception as e:
         return f"❌ Execution Error: {e}"
 
@@ -267,8 +273,19 @@ Your goal is to Create, Verify, and Deliver automated tests.
 5. **DELIVERY**: `git_commit` (Only if pass) -> `git_push` -> `create_pr` -> `task_complete`.
 
 TOOLS AVAILABLE:
-read_jira_ticket, init_workspace, list_files, read_file, write_file, append_file,
-run_robot_test, git_commit, git_push, create_pr, install_package, task_complete, run_shell_command
+read_jira_ticket(issue_key), 
+init_workspace(branch_name), 
+list_files(directory), 
+read_file(file_path), 
+write_file(file_path, content), 
+append_file(file_path, content),
+run_robot_test(file_path),  # 👈 ระบุชื่อ args ไปเลย
+git_commit(message), 
+git_push(branch_name), 
+create_pr(title, body), 
+install_package(package_name), 
+task_complete(summary), 
+run_shell_command(command)
 
 RESPONSE FORMAT (JSON ONLY):
 { "action": "tool_name", "args": { ... } }
