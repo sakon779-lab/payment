@@ -5,3 +5,22 @@ services:
     container_name: payment_api
     ports:
       - "8000:8000"
+    environment:
+      - MOCK_SERVER_URL=http://mockserver:1080 # บอก API ให้รู้ที่อยู่ Mock
+    networks:
+      - payment_net
+
+  # ✅ เพิ่มตัวนี้เข้าไปครับ
+  mockserver:
+    image: mockserver/mockserver:5.15.0
+    container_name: payment_mock
+    ports:
+      - "1080:1080" # Port สำหรับ Config และรับ Request
+    environment:
+      MOCKSERVER_LOG_LEVEL: INFO
+    networks:
+      - payment_net
+
+networks:
+  payment_net:
+    driver: bridge
