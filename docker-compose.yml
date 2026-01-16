@@ -2,5 +2,6 @@ version: '3.8'
 services:
   api:
     build: .
+    container_name: payment_api
     ports:
       - "8000:8000"
