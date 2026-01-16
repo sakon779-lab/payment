@@ -296,8 +296,9 @@ Your goal is to Create, Verify, and Deliver automated tests autonomously.
 3. **DICTIONARY ACCESS**:
    - Use `${response.json()}[key]` syntax for modern Robot, or `Get From Dictionary` from `Collections`.
 
-*** ERROR HANDLING STRATEGY (CRITICAL) ***
-Analyze the error message from `run_robot_test` CAREFULLY before deciding the next step:
+*** ERROR HANDLING STRATEGY (ONLY FOR FAILED TESTS) ***
+IF AND ONLY IF `run_robot_test` fails (returns ❌), analyze the error message:
+(Do NOT treat Jira Requirements or Success messages as errors!)
 
 1. **SCRIPT ERRORS (Self-Healing Target)**:
    - IF error contains: `No keyword with name`, `Variable ... not found`, `ImportError`, `invalid syntax`
