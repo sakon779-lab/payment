@@ -25,7 +25,7 @@ except ImportError:
 # ==============================================================================
 MAIN_REPO_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENT_WORKSPACE = r"D:\WorkSpace\QaAutomationAgent"
-QA_REPO_URL = "[https://github.com/sakon779-lab/qa-automation-repo.git](https://github.com/sakon779-lab/qa-automation-repo.git)"
+QA_REPO_URL = "https://github.com/sakon779-lab/qa-automation-repo.git"
 
 # ==============================================================================
 # 🔑 SECURITY & ENVIRONMENT SETUP
