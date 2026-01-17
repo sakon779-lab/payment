@@ -452,6 +452,13 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
                 step_outputs.append(f"Task Completed: {result}")
                 break
 
+            # 🔥 FIX: เช็คว่า Tool มีจริงไหม?
+            if action not in TOOLS:
+                logger.warning(f"⚠️ AI tried to use unknown tool: {action}")
+                step_outputs.append(
+                    f"❌ Error: Tool '{action}' does not exist. Available tools: {', '.join(TOOLS.keys())}. Please use 'write_file' or 'run_robot_test'.")
+                continue  # ข้ามไปรอบหน้า AI จะได้อ่าน Error แล้วแก้ตัว
+
             logger.info(f"🔧 Tool: {action}")
             result = execute_tool_dynamic(action, args)
             step_outputs.append(f"Tool Output ({action}):\n{result}")
