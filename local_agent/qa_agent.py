@@ -438,6 +438,14 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
             action = tool_call.get("action")
             args = tool_call.get("args", {})
 
+            # 🔥 FIX: ถ้า AI ส่ง JSON มาแต่ไม่มี Action (คือการสรุปงาน/คิด)
+            if not action:
+                logger.info("🤔 AI is summarizing/thinking...")
+                # แจ้งเตือนกลับไปให้น้องรู้ตัวว่าต้องส่ง Action นะ
+                step_outputs.append(
+                    "System: You sent a JSON summary but NO 'action'. Please immediately output the next Tool Action JSON (e.g., init_workspace).")
+                continue
+
             if action == "task_complete":
                 task_finished = True
                 result = args.get("summary", "Done")
