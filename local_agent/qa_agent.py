@@ -44,7 +44,52 @@ logger = logging.getLogger("QAAgent")
 
 
 # ==============================================================================
-# 🛡️ SANDBOX WRAPPERS
+# 🛠️ HELPER FUNCTIONS
+# ==============================================================================
+def extract_code_block(text: str) -> str:
+    """Extracts content from the first markdown code block in the text."""
+    # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
+    match = re.search(r"```\w*\n(.*?)```", text, re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
+    """Extracts JSON actions, supporting Python-style dicts if JSON fails."""
+    results = []
+    decoder = json.JSONDecoder()
+    pos = 0
+    while pos < len(text):
+        try:
+            search = re.search(r"\{", text[pos:])
+            if not search: break
+            start_index = pos + search.start()
+            obj, end_index = decoder.raw_decode(text, idx=start_index)
+            if isinstance(obj, dict) and "action" in obj:
+                results.append(obj)
+            pos = end_index
+        except:
+            pos += 1
+
+    if not results:
+        try:
+            matches = re.findall(r"(\{.*?\})", text, re.DOTALL)
+            for match in matches:
+                try:
+                    clean_match = match.replace("true", "True").replace("false", "False").replace("null", "None")
+                    obj = ast.literal_eval(clean_match)
+                    if isinstance(obj, dict) and "action" in obj:
+                        results.append(obj)
+                except:
+                    continue
+        except:
+            pass
+    return results
+
+
+# ==============================================================================
+# 🛡️ SANDBOX WRAPPERS (TOOLS)
 # ==============================================================================
 def list_files(directory: str = ".") -> str:
     try:
@@ -115,9 +160,6 @@ def read_jira_ticket(issue_key: str) -> str:
         return f"❌ Connection Error: {e}"
 
 
-# ==============================================================================
-# 🛡️ GIT OPS
-# ==============================================================================
 def init_workspace(branch_name: str, base_branch: str = "main") -> str:
     try:
         if not os.path.exists(os.path.join(AGENT_WORKSPACE, ".git")):
@@ -187,35 +229,26 @@ def create_pr_wrapper(title: str, body: str) -> str:
         return f"❌ PR Error: {e}"
 
 
-# ==============================================================================
-# 🧪 TEST TOOLS (Robot Framework)
-# ==============================================================================
-def run_robot_test(file_path: str) -> str:  # 👈 แก้ชื่อตัวแปรตรงนี้จาก test_path เป็น file_path
-    """Runs a Robot Framework test file."""
+def run_robot_test(file_path: str) -> str:
     try:
-        # แก้ตรงนี้ด้วยให้ใช้ variable ใหม่
         full_path = os.path.join(AGENT_WORKSPACE, file_path)
-
-        if not os.path.exists(full_path):
-            return f"❌ Error: Test file '{file_path}' not found."  # 👈 แก้ตรงนี้
+        if not os.path.exists(full_path): return f"❌ Error: Test file '{file_path}' not found."
 
         results_dir = os.path.join(AGENT_WORKSPACE, "results")
         os.makedirs(results_dir, exist_ok=True)
 
         command = [sys.executable, "-m", "robot", "-d", "results", full_path]
-        logger.info(f"🤖 Running Robot Test: {file_path}...")  # 👈 แก้ตรงนี้
+        logger.info(f"🤖 Running Robot Test: {file_path}...")
 
         env = os.environ.copy()
         env["PYTHONPATH"] = AGENT_WORKSPACE + os.pathsep + env.get("PYTHONPATH", "")
 
         result = subprocess.run(command, cwd=AGENT_WORKSPACE, env=env, capture_output=True, text=True)
         output = result.stdout + "\n" + result.stderr
-
         if result.returncode == 0:
             return f"✅ ROBOT PASSED:\n{output}"
         else:
-            return f"❌ ROBOT FAILED (Exit Code {result.returncode}):\n{output}\n\n👉 INSTRUCTION: Analyze the failure logs above and fix the .robot file."
-
+            return f"❌ ROBOT FAILED:\n{output}\n\n👉 INSTRUCTION: Analyze the failure logs and fix the .robot file."
     except Exception as e:
         return f"❌ Execution Error: {e}"
 
@@ -248,149 +281,6 @@ TOOLS: Dict[str, Any] = {
     "git_push": git_push_wrapper, "create_pr": create_pr_wrapper
 }
 
-# ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Enhanced Logic)
-# ==============================================================================
-SYSTEM_PROMPT = """
-You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
-Your goal is to Create, Verify, and Deliver automated tests autonomously.
-
-*** CRITICAL: ATOMICITY & FORMAT ***
-1. **ONE ACTION PER TURN**: Strictly ONE JSON block per response.
-2. **NO CHAINING**: Wait for the tool result.
-3. **STOP**: Stop after `}`.
-
-*** SCOPE FILTERING (CRITICAL) ***
-1. **IGNORE UNIT TEST INSTRUCTIONS**:
-   - The Jira ticket describes tasks for Developers (e.g., "Create src/main.py", "Write tests/test_api.py using pytest").
-   - **DO NOT** implement Python Unit Tests or Source Code.
-   - **DO NOT** create files like `tests/test_api.py` inside the QA Repository.
-2. **TRANSLATE TO ROBOT**:
-   - Instead, READ the Requirement to understand the *Behavior*.
-   - Example: If Jira says "Unit test must check status 200", you MUST implement a **Robot Framework test** that checks status 200.
-
-*** 🧠 INTELLIGENT BEHAVIOR (DO NOT WAIT FOR INSTRUCTIONS) ***
-1. **DISCOVER STRUCTURE**:
-   - Before creating any file, use `list_files` to understand the existing folder structure.
-   - If `tests/payment_service/` exists, put new payment tests there. DO NOT create `tests/api/` if it breaks consistency.
-2. **DESIGN TEST SCENARIOS**:
-   - Do NOT just test the "Happy Path".
-   - AUTOMATICALLY generate:
-     - 1. Positive Case (200 OK)
-     - 2. Negative Case (Validation errors, 400/404)
-     - 3. Edge Case (Empty strings, Special chars, Boundary values)
-3. **SELF-CORRECTION**:
-   - If a test fails, analyze the log. If it's a script error, FIX IT. If it's a bug, REPORT IT.
-
-*** IMPORTANT: JSON STRING FORMATTING ***
-- Do NOT use triple quotes (\"\"\") for strings in JSON. This is invalid JSON.
-- For multi-line file content, use `\\n` to escape newlines.
-
-*** ROBOT FRAMEWORK SYNTAX RULES (STRICT) ***
-1. **HEADERS**: ALWAYS use 3 asterisks.
-   - Correct: `*** Settings ***`, `*** Test Cases ***`, `*** Variables ***`
-   - Wrong: `** Settings **` (2 asterisks will FAIL).
-2. **SEPARATORS**: Use **4 SPACES** (or `\\t`) between keywords and arguments.
-   - Correct: `Create Session    mysession    http://localhost:8080`
-   - Wrong: `Create Session mysession http://localhost:8080` (Single space will FAIL).
-3. **DICTIONARY ACCESS**:
-   - Use `${response.json()}[key]` syntax for modern Robot, or `Get From Dictionary` from `Collections`.
-
-*** ERROR HANDLING STRATEGY (ONLY FOR FAILED TESTS) ***
-IF AND ONLY IF `run_robot_test` fails (returns ❌), analyze the error message:
-(Do NOT treat Jira Requirements or Success messages as errors!)
-
-1. **SCRIPT ERRORS (Self-Healing Target)**:
-   - IF error contains: `No keyword with name`, `Variable ... not found`, `ImportError`, `invalid syntax`
-   - **ACTION**: These are YOUR mistakes. **FIX the .robot file**.
-   - *Example*: If `No keyword 'Get From Dictionary'`, ADD `Library Collections` to Settings.
-
-2. **ASSERTION FAILURES (Potential Bugs)**:
-   - IF error contains: `should be ... but was ...`, `Status should be 200`, `Dictionary does not contain key`
-   - **ACTION**: 
-     - First, DOUBLE CHECK your test logic. Did you expect the wrong thing?
-     - If you are following the Requirement correctly, **DO NOT CHANGE THE TEST** to match the wrong output.
-     - instead, **STOP and REPORT** that a potential BUG was found.
-
-*** QA CODING STANDARDS ***
-1. **ISOLATION**: Use `${uuid}` or Random Strings. Use `[Setup]` / `[Teardown]`.
-2. **STRUCTURE**: Tests in `tests/project/`.
-3. **LIBRARIES**: 
-   - ALWAYS `Library RequestsLibrary`.
-   - ALWAYS `Library Collections` (if using Dictionaries/JSON).
-   - ALWAYS `Library String`.
-
-*** WORKFLOW ***
-1. **UNDERSTAND**: `read_jira_ticket` (if provided) or prompt.
-2. **INIT**: `init_workspace(branch_name)` (prefix `qa/`).
-3. **PLAN & CODE**: `write_file` (.robot).
-4. **VERIFY**: `run_robot_test` -> **Apply Error Handling Strategy**.
-5. **DELIVERY**: `git_commit` (Only if pass) -> `git_push` -> `create_pr` -> `task_complete`.
-
-TOOLS AVAILABLE:
-read_jira_ticket(issue_key), 
-init_workspace(branch_name), 
-list_files(directory), 
-read_file(file_path), 
-write_file(file_path, content), 
-append_file(file_path, content),
-run_robot_test(file_path),  <-- ระบุชัดๆ แบบนี้เลย
-git_commit(message), 
-git_push(branch_name), 
-create_pr(title, body), 
-install_package(package_name), 
-task_complete(summary), 
-run_shell_command(command)
-
-RESPONSE FORMAT (JSON ONLY):
-{ "action": "tool_name", "args": { ... } }
-"""
-
-
-# ==============================================================================
-# 🧩 ROBUST JSON EXTRACTION (The Fix!)
-# ==============================================================================
-def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
-    """
-    Extracts JSON actions.
-    FEATURE: Supports Python-style dicts with triple quotes (common LLM error).
-    """
-    results = []
-
-    # 1. Try Standard JSON Decoding first (Fast path)
-    decoder = json.JSONDecoder()
-    pos = 0
-    while pos < len(text):
-        try:
-            search = re.search(r"\{", text[pos:])
-            if not search: break
-            start_index = pos + search.start()
-            obj, end_index = decoder.raw_decode(text, idx=start_index)
-            if isinstance(obj, dict) and "action" in obj:
-                results.append(obj)
-            pos = end_index
-        except:
-            pos += 1
-
-    # 2. If Standard JSON failed, Try Python AST (The 'Dirty' Fix)
-    if not results:
-        try:
-            # Find the largest block that looks like a dict { ... }
-            matches = re.findall(r"(\{.*?\})", text, re.DOTALL)
-            for match in matches:
-                try:
-                    # Clean up common JSON-isms that break python AST
-                    clean_match = match.replace("true", "True").replace("false", "False").replace("null", "None")
-                    obj = ast.literal_eval(clean_match)
-                    if isinstance(obj, dict) and "action" in obj:
-                        results.append(obj)
-                except:
-                    continue
-        except:
-            pass
-
-    return results
-
 
 def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
     if tool_name not in TOOLS: return f"Error: Unknown tool '{tool_name}'"
@@ -401,6 +291,63 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
         return f"Error executing {tool_name}: {e}"
 
 
+# ==============================================================================
+# 🧠 SYSTEM PROMPT (Gamma Persona - Professional Edition)
+# ==============================================================================
+SYSTEM_PROMPT = """
+You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
+Your goal is to Create, Verify, and Deliver automated tests autonomously.
+
+*** CRITICAL: ATOMICITY & FORMAT ***
+1. **ONE ACTION PER TURN**: Strictly ONE JSON block per response.
+2. **NO CHAINING**: Wait for the tool result.
+3. **STOP**: Stop after `}`.
+
+*** ⚡ PRO CODING STANDARDS (CONTENT DETACHMENT) ***
+When using `write_file` or `append_file`, DO NOT put the file content inside the JSON args.
+Instead, follow this specific format:
+1. Output the JSON Action first.
+2. Immediately follow it with a **Markdown Code Block** containing the actual content.
+
+**Format Example:**
+[JSON Action]
+```json
+{ "action": "write_file", "args": { "file_path": "tests/example.robot" } }
+```
+[File Content]
+```robot
+*** Settings ***
+Library    RequestsLibrary
+...
+```
+
+*** SCOPE FILTERING ***
+1. **IGNORE UNIT TESTS**: If Jira asks for Python Unit Tests (`test_api.py`), IGNORE it.
+2. **ROBOT ONLY**: Implement the requirement using Robot Framework in `tests/`.
+
+*** INTELLIGENT BEHAVIOR ***
+1. **DISCOVER**: Use `list_files` to find where to put tests.
+2. **DESIGN**: Auto-generate Positive, Negative, and Edge cases.
+3. **SELF-CORRECT**: If a script fails, fix the `.robot` file. If logic fails, REPORT BUG.
+
+*** ROBOT SYNTAX RULES ***
+1. **HEADERS**: `*** Settings ***` (3 asterisks).
+2. **SEPARATORS**: 4 spaces.
+
+TOOLS AVAILABLE:
+read_jira_ticket(issue_key), init_workspace(branch_name), list_files(directory),
+read_file(file_path), write_file(file_path), append_file(file_path),
+run_robot_test(file_path), git_commit(message), git_push(branch_name),
+create_pr(title, body), install_package(package_name), task_complete(summary)
+
+RESPONSE FORMAT (JSON ONLY + CODE BLOCK):
+{ "action": "tool_name", "args": { ... } }
+"""
+
+
+# ==============================================================================
+# 🚀 MAIN AGENT LOOP
+# ==============================================================================
 def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
     logger.info(f"🚀 Starting QA Task: {task_description}")
 
@@ -412,6 +359,7 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
     for step in range(max_steps):
         logger.info(f"🔄 Step {step + 1}/{max_steps}...")
 
+        # 1. Query LLM
         try:
             response_payload = query_qwen(history)
             if isinstance(response_payload, dict):
@@ -426,24 +374,25 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
 
         tool_calls = _extract_all_jsons(content)
 
+        # 2. Handle missing JSON (Thinking or Chatting)
         if not tool_calls:
             logger.warning("No valid JSON found, treating as thought.")
             history.append({"role": "assistant", "content": content})
+            history.append(
+                {"role": "user", "content": "System: You MUST output a valid JSON Action block immediately."})
             continue
 
         step_outputs = []
         task_finished = False
 
+        # 3. Execute Tools
         for tool_call in tool_calls:
             action = tool_call.get("action")
             args = tool_call.get("args", {})
 
-            # 🔥 FIX: ถ้า AI ส่ง JSON มาแต่ไม่มี Action (คือการสรุปงาน/คิด)
+            # 3.1 Check Action Existence
             if not action:
-                logger.info("🤔 AI is summarizing/thinking...")
-                # แจ้งเตือนกลับไปให้น้องรู้ตัวว่าต้องส่ง Action นะ
-                step_outputs.append(
-                    "System: You sent a JSON summary but NO 'action'. Please immediately output the next Tool Action JSON (e.g., init_workspace).")
+                step_outputs.append("System: JSON is missing 'action'. Please retry.")
                 continue
 
             if action == "task_complete":
@@ -452,17 +401,28 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
                 step_outputs.append(f"Task Completed: {result}")
                 break
 
-            # 🔥 FIX: เช็คว่า Tool มีจริงไหม?
+            # 3.2 Check Tool Validity
             if action not in TOOLS:
-                logger.warning(f"⚠️ AI tried to use unknown tool: {action}")
-                step_outputs.append(
-                    f"❌ Error: Tool '{action}' does not exist. Available tools: {', '.join(TOOLS.keys())}. Please use 'write_file' or 'run_robot_test'.")
-                continue  # ข้ามไปรอบหน้า AI จะได้อ่าน Error แล้วแก้ตัว
+                available = ", ".join(TOOLS.keys())
+                step_outputs.append(f"❌ Error: Tool '{action}' not found. Available: {available}")
+                continue
 
+            # 🌟 3.3 CONTENT DETACHMENT: Extract Code Block 🌟
+            if action in ["write_file", "append_file"]:
+                code_content = extract_code_block(content)
+                if code_content:
+                    logger.info(f"📝 Extracted content from Markdown ({len(code_content)} chars)")
+                    args["content"] = code_content
+                elif "content" not in args:
+                    step_outputs.append("❌ Error: No content provided! Please use a Markdown code block.")
+                    continue
+
+            # 3.4 Execute
             logger.info(f"🔧 Tool: {action}")
             result = execute_tool_dynamic(action, args)
             step_outputs.append(f"Tool Output ({action}):\n{result}")
 
+            # 3.5 Stop on Critical Failures
             if action == "init_workspace" and "❌" in result:
                 return f"FAILED: {result}"
 
@@ -470,6 +430,7 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
             print(f"\n✅ TASK COMPLETED: {result}")
             return result
 
+        # Update History
         history.append({"role": "assistant", "content": content})
         history.append({"role": "user", "content": "\n".join(step_outputs)})
 
