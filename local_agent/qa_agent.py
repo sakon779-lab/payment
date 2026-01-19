@@ -48,17 +48,14 @@ logger = logging.getLogger("QAAgent")
 # ==============================================================================
 def extract_code_block(text: str) -> str:
     """Extracts content from Markdown. Prioritizes the LAST block that is NOT a JSON action."""
-    # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
     matches = re.findall(r"```\w*\n(.*?)```", text, re.DOTALL)
 
     if not matches:
         return ""
 
     # 🌟 Logic: Search backwards for the first block that doesn't look like an Agent Action JSON
-    # เพื่อป้องกันกรณี AI ส่ง JSON มาหลายก้อน แล้วเราไปหยิบผิดก้อน
     for content in reversed(matches):
         cleaned_content = content.strip()
-        # Heuristic: ถ้าใน Block มี "action": และ "args": แสดงว่าเป็นคำสั่ง ไม่ใช่เนื้อหาไฟล์
         if not ('"action":' in cleaned_content and '"args":' in cleaned_content):
             return cleaned_content
 
@@ -302,7 +299,7 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Network & Syntax Expert)
+# 🧠 SYSTEM PROMPT (Gamma Persona - Modern & Strict Edition)
 # ==============================================================================
 SYSTEM_PROMPT = """
 You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
@@ -348,10 +345,24 @@ Library    RequestsLibrary
 1. **ANTI-LOOP**: If `run_robot_test` FAILS, you MUST analyze the log and call `write_file` to FIX the code immediately. DO NOT just `read_file`.
 
 *** 🛑 ROBOT FRAMEWORK STRICT RULES 🛑 ***
-1. **NO CUSTOM WRAPPERS**: Do NOT create custom keywords like `Create Session` or `Get Request`. Use `RequestsLibrary` keywords directly.
-2. **JSON PARSING**:
-   - ❌ **FORBIDDEN**: `Convert Response To Json`.
+1. **USE MODERN KEYWORDS**:
+   - ❌ **DEPRECATED**: `Get Request`, `Post Request`.
+   - ✅ **REQUIRED**: `GET On Session`, `POST On Session`.
+
+2. **JSON PARSING (CRITICAL)**:
+   - ❌ **FORBIDDEN**: `Convert Response To Json`, `Evaluate response.json()`.
    - ✅ **REQUIRED**: `${response.json()}` variable access.
+
+   ❌ **WRONG (DO NOT USE):**
+   ```robot
+   ${json}=  Evaluate  response.json()
+   ```
+
+   ✅ **CORRECT (USE THIS):**
+   ```robot
+   ${json}=  Set Variable  ${response.json()}
+   Log  ${json}[original]
+   ```
 
 TOOLS AVAILABLE:
 read_jira_ticket(issue_key), init_workspace(branch_name), list_files(directory),
@@ -445,7 +456,7 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
             if action == "init_workspace" and "❌" in result:
                 return f"FAILED: {result}"
 
-            # ✅ STRICT ATOMICITY: หยุดหลังจากทำสำเร็จ 1 งาน เพื่อป้องกัน AI ทำงานซ้อน
+            # ✅ STRICT ATOMICITY: หยุดหลังจากทำสำเร็จ 1 งาน
             break
 
         if task_finished:
