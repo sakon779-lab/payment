@@ -25,8 +25,7 @@ except ImportError:
 # ==============================================================================
 MAIN_REPO_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENT_WORKSPACE = r"D:\WorkSpace\QaAutomationAgent"
-# ✅ URL ถูกต้องแล้วครับ (Clean URL)
-QA_REPO_URL = "https://github.com/sakon779-lab/qa-automation-repo.git"
+QA_REPO_URL = "[https://github.com/sakon779-lab/qa-automation-repo.git](https://github.com/sakon779-lab/qa-automation-repo.git)"
 
 # ==============================================================================
 # 🔑 SECURITY & ENVIRONMENT SETUP
@@ -49,14 +48,12 @@ logger = logging.getLogger("QAAgent")
 # ==============================================================================
 def extract_code_block(text: str) -> str:
     """Extracts content from Markdown. Prioritizes the LAST block that is NOT a JSON action."""
-    # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
     matches = re.findall(r"```\w*\n(.*?)```", text, re.DOTALL)
 
     if not matches:
         return ""
 
     # 🌟 Logic: Search backwards for the first block that doesn't look like an Agent Action JSON
-    # เพื่อป้องกันกรณี AI ส่ง JSON มาหลายก้อน แล้วเราไปหยิบผิดก้อน
     for content in reversed(matches):
         cleaned_content = content.strip()
         # Heuristic: ถ้าใน Block มี "action": และ "args": แสดงว่าเป็นคำสั่ง ไม่ใช่เนื้อหาไฟล์
@@ -303,7 +300,7 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Autonomous QA Edition)
+# 🧠 SYSTEM PROMPT (Gamma Persona - Dictator Edition)
 # ==============================================================================
 SYSTEM_PROMPT = """
 You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
@@ -338,11 +335,11 @@ Instead, follow this specific format:
 { "action": "write_file", "args": { "file_path": "tests/example.robot" } }
 
 [File Content]
-(Start Markdown Block)
+```robot
 *** Settings ***
 Library    RequestsLibrary
 ...
-(End Markdown Block)
+```
 
 *** INTELLIGENT BEHAVIOR ***
 1. **DISCOVER**: Use `list_files` to find where to put tests.
@@ -358,15 +355,15 @@ Library    RequestsLibrary
    - You **MUST** use `${response.json()}` variable access.
 
    ❌ **WRONG (DO NOT USE):**
-   (Start Markdown Block)
+   ```robot
    ${json}=  Convert Response To Json  ${response}
-   (End Markdown Block)
+   ```
 
    ✅ **CORRECT (USE THIS):**
-   (Start Markdown Block)
+   ```robot
    ${json}=  Set Variable  ${response.json()}
    Log  ${json}[original]
-   (End Markdown Block)
+   ```
 
 TOOLS AVAILABLE:
 read_jira_ticket(issue_key), init_workspace(branch_name), list_files(directory),
@@ -461,7 +458,6 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
                 return f"FAILED: {result}"
 
             # ✅ STRICT ATOMICITY: Process only the first valid action per turn.
-            # This ensures we don't accidentally apply the wrong code block to the wrong file.
             break
 
         if task_finished:
