@@ -44,11 +44,13 @@ logger = logging.getLogger("QAAgent")
 
 
 # ==============================================================================
-# 🛠️ HELPER FUNCTIONS (FINAL ROBUST LOGIC)
+# 🛠️ HELPER FUNCTIONS (CORE LOGIC)
 # ==============================================================================
 def extract_code_block(text: str) -> str:
-    """Extracts content from Markdown. Prioritizes the LAST block that is NOT a JSON action."""
-    # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
+    """
+    Extracts content from Markdown Code Blocks.
+    CRITICAL: Prioritizes the LAST block that is NOT a JSON action to prevent mixing up content.
+    """
     matches = re.findall(r"```\w*\n(.*?)```", text, re.DOTALL)
 
     if not matches:
@@ -57,7 +59,7 @@ def extract_code_block(text: str) -> str:
     # 🌟 Logic: Search backwards for the first block that doesn't look like an Agent Action JSON
     for content in reversed(matches):
         cleaned_content = content.strip()
-        # Heuristic: ถ้าใน Block มี "action": และ "args": แสดงว่าเป็นคำสั่ง ไม่ใช่เนื้อหาไฟล์
+        # Heuristic: If it contains "action": and "args":, it is likely a command, NOT file content.
         if not ('"action":' in cleaned_content and '"args":' in cleaned_content):
             return cleaned_content
 
@@ -65,7 +67,7 @@ def extract_code_block(text: str) -> str:
 
 
 def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
-    """Extracts JSON actions, supporting Python-style dicts if JSON fails."""
+    """Extracts JSON actions from the LLM response."""
     results = []
     decoder = json.JSONDecoder()
     pos = 0
@@ -83,6 +85,7 @@ def _extract_all_jsons(text: str) -> List[Dict[str, Any]]:
 
     if not results:
         try:
+            # Fallback for Python-style dict strings
             matches = re.findall(r"(\{.*?\})", text, re.DOTALL)
             for match in matches:
                 try:
@@ -301,8 +304,9 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Draconian/Autonomous Mode)
+# 🧠 SYSTEM PROMPT (Gamma Persona - Syntax Guided & Autonomous Mode)
 # ==============================================================================
+# NOTE: Using string concatenation to prevent UI rendering issues with backticks.
 SYSTEM_PROMPT = """
 You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
 Your goal is to Create, Verify, and Deliver automated tests autonomously.
@@ -314,26 +318,25 @@ If the user command is simple (e.g., "Process SCRUM-24", "Do SCRUM-24"), you MUS
 3. EXECUTE the full "DEFINITION OF DONE" workflow (Write -> Verify -> Deliver).
 DO NOT stop at analysis. DO NOT wait for more instructions.
 
-*** SCOPE FILTERING ***
-1. **TESTER ROLE**: Ignore Dev tasks (e.g. "Create src/main.py"). Only create `tests/*.robot`.
-2. **NO UNIT TESTS**: Ignore `pytest`/`unittest`. Use Robot Framework.
+*** 📚 ROBOT SYNTAX CHEATSHEET (CORRECT USAGE) ***
+You MUST follow these patterns exactly. Do not guess arguments.
+1. **Create Session**:
+   ✅ `Create Session    alias_name    http://127.0.0.1:8000`
+   ❌ `Create Session    http://127.0.0.1:8000` (Wrong: Missing alias)
 
-*** 🌐 NETWORK RULES ***
-1. **NO LOCALHOST**: Use `127.0.0.1`.
-2. **BASE URL**: `Create Session` at ROOT (`http://127.0.0.1:8000`), NOT endpoint.
+2. **GET On Session** (Modern Keyword):
+   ✅ `GET On Session    alias_name    /endpoint`
+   ❌ `GET On Session    /endpoint` (Wrong: Missing alias)
 
-*** 🛑 STRICT ANTI-PATTERNS (DO NOT DO THESE) 🛑 ***
-1. **NO RECURSION / SHADOWING**:
-   - ❌ **NEVER** write a `*** Keywords ***` section that redefines `Create Session` or `GET On Session`.
-   - This causes an INFINITE LOOP.
-   - ✅ **USE LIBRARY KEYWORDS DIRECTLY** in `*** Test Cases ***`.
+3. **JSON Access**:
+   ✅ `${json}=    Set Variable    ${response.json()}`
+   ❌ `${json}=    Evaluate    response.json()` (Wrong: Python eval fails)
 
-2. **NO 'EVALUATE' FOR JSON**:
-   - ❌ **NEVER** use: `${j}= Evaluate ${response.json()}`. This fails.
-   - ❌ **NEVER** use: `Convert Response To Json`. Deprecated.
-   - ✅ **ONLY USE**: `${j}= Set Variable ${response.json()}`.
+*** 🛑 STRICT ANTI-PATTERNS 🛑 ***
+1. **NO RECURSION**: NEVER write a `*** Keywords ***` section that redefines `Create Session` or `GET On Session`.
+2. **NO LOCALHOST**: Use `127.0.0.1`.
 
-*** 🏁 DEFINITION OF DONE (MANDATORY) ***
+*** 🏁 DEFINITION OF DONE ***
 1. **WRITE**: Create `.robot` file.
 2. **VERIFY**: Run `run_robot_test`. (If fail -> Fix -> Run again).
 3. **DELIVER**: `git_commit` -> `git_push` -> `create_pr`.
