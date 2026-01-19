@@ -48,6 +48,7 @@ logger = logging.getLogger("QAAgent")
 # ==============================================================================
 def extract_code_block(text: str) -> str:
     """Extracts content from Markdown. Prioritizes the LAST block that is NOT a JSON action."""
+    # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
     matches = re.findall(r"```\w*\n(.*?)```", text, re.DOTALL)
 
     if not matches:
@@ -56,6 +57,7 @@ def extract_code_block(text: str) -> str:
     # 🌟 Logic: Search backwards for the first block that doesn't look like an Agent Action JSON
     for content in reversed(matches):
         cleaned_content = content.strip()
+        # Heuristic: ถ้าใน Block มี "action": และ "args": แสดงว่าเป็นคำสั่ง ไม่ใช่เนื้อหาไฟล์
         if not ('"action":' in cleaned_content and '"args":' in cleaned_content):
             return cleaned_content
 
@@ -299,7 +301,7 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Autonomous Edition)
+# 🧠 SYSTEM PROMPT (Gamma Persona - Draconian/Autonomous Mode)
 # ==============================================================================
 SYSTEM_PROMPT = """
 You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
@@ -320,13 +322,20 @@ DO NOT stop at analysis. DO NOT wait for more instructions.
 1. **NO LOCALHOST**: Use `127.0.0.1`.
 2. **BASE URL**: `Create Session` at ROOT (`http://127.0.0.1:8000`), NOT endpoint.
 
-*** 🛑 STRICT SYNTAX RULES ***
-1. Use `GET On Session`, `POST On Session`.
-2. Use `${response.json()}`. NEVER use `Convert Response To Json`.
+*** 🛑 STRICT ANTI-PATTERNS (DO NOT DO THESE) 🛑 ***
+1. **NO RECURSION / SHADOWING**:
+   - ❌ **NEVER** write a `*** Keywords ***` section that redefines `Create Session` or `GET On Session`.
+   - This causes an INFINITE LOOP.
+   - ✅ **USE LIBRARY KEYWORDS DIRECTLY** in `*** Test Cases ***`.
+
+2. **NO 'EVALUATE' FOR JSON**:
+   - ❌ **NEVER** use: `${j}= Evaluate ${response.json()}`. This fails.
+   - ❌ **NEVER** use: `Convert Response To Json`. Deprecated.
+   - ✅ **ONLY USE**: `${j}= Set Variable ${response.json()}`.
 
 *** 🏁 DEFINITION OF DONE (MANDATORY) ***
 1. **WRITE**: Create `.robot` file.
-2. **VERIFY**: Run `run_robot_test` until PASS.
+2. **VERIFY**: Run `run_robot_test`. (If fail -> Fix -> Run again).
 3. **DELIVER**: `git_commit` -> `git_push` -> `create_pr`.
 4. **COMPLETE**: Call `task_complete`.
 
@@ -344,11 +353,11 @@ DO NOT stop at analysis. DO NOT wait for more instructions.
 { "action": "write_file", "args": { "file_path": "tests/example.robot" } }
 
 [File Content]
-```robot
+""" + "```" + """robot
 *** Settings ***
 Library    RequestsLibrary
 ...
-```
+""" + "```" + """
 
 TOOLS AVAILABLE:
 read_jira_ticket(issue_key), init_workspace(branch_name), list_files(directory),
