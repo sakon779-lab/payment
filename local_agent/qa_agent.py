@@ -25,6 +25,7 @@ except ImportError:
 # ==============================================================================
 MAIN_REPO_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AGENT_WORKSPACE = r"D:\WorkSpace\QaAutomationAgent"
+# ✅ URL ถูกต้องแล้วครับ (Clean URL)
 QA_REPO_URL = "https://github.com/sakon779-lab/qa-automation-repo.git"
 
 # ==============================================================================
@@ -44,14 +45,24 @@ logger = logging.getLogger("QAAgent")
 
 
 # ==============================================================================
-# 🛠️ HELPER FUNCTIONS
+# 🛠️ HELPER FUNCTIONS (UPGRADED LOGIC)
 # ==============================================================================
 def extract_code_block(text: str) -> str:
-    """Extracts content from the first markdown code block in the text."""
+    """Extracts content from Markdown. Prioritizes the LAST block that is NOT a JSON action."""
     # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
-    match = re.search(r"```\w*\n(.*?)```", text, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+    matches = re.findall(r"```\w*\n(.*?)```", text, re.DOTALL)
+
+    if not matches:
+        return ""
+
+    # 🌟 Logic: Search backwards for the first block that doesn't look like an Agent Action JSON
+    # เพื่อป้องกันกรณี AI ส่ง JSON มาหลายก้อน แล้วเราไปหยิบผิดก้อน
+    for content in reversed(matches):
+        cleaned_content = content.strip()
+        # Heuristic: ถ้าใน Block มี "action": และ "args": แสดงว่าเป็นคำสั่ง ไม่ใช่เนื้อหาไฟล์
+        if not ('"action":' in cleaned_content and '"args":' in cleaned_content):
+            return cleaned_content
+
     return ""
 
 
@@ -292,7 +303,7 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Dictator Edition)
+# 🧠 SYSTEM PROMPT (Gamma Persona - Autonomous QA Edition)
 # ==============================================================================
 SYSTEM_PROMPT = """
 You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
@@ -448,6 +459,10 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
             # 3.5 Stop on Critical Failures
             if action == "init_workspace" and "❌" in result:
                 return f"FAILED: {result}"
+
+            # ✅ STRICT ATOMICITY: Process only the first valid action per turn.
+            # This ensures we don't accidentally apply the wrong code block to the wrong file.
+            break
 
         if task_finished:
             print(f"\n✅ TASK COMPLETED: {result}")
