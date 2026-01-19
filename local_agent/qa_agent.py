@@ -44,16 +44,18 @@ logger = logging.getLogger("QAAgent")
 
 
 # ==============================================================================
-# 🛠️ HELPER FUNCTIONS (UPGRADED LOGIC)
+# 🛠️ HELPER FUNCTIONS (FINAL ROBUST LOGIC)
 # ==============================================================================
 def extract_code_block(text: str) -> str:
     """Extracts content from Markdown. Prioritizes the LAST block that is NOT a JSON action."""
+    # Pattern: หา ``` อะไรก็ได้ ...เนื้อหา... ```
     matches = re.findall(r"```\w*\n(.*?)```", text, re.DOTALL)
 
     if not matches:
         return ""
 
     # 🌟 Logic: Search backwards for the first block that doesn't look like an Agent Action JSON
+    # เพื่อป้องกันกรณี AI ส่ง JSON มาหลายก้อน แล้วเราไปหยิบผิดก้อน
     for content in reversed(matches):
         cleaned_content = content.strip()
         # Heuristic: ถ้าใน Block มี "action": และ "args": แสดงว่าเป็นคำสั่ง ไม่ใช่เนื้อหาไฟล์
@@ -300,7 +302,7 @@ def execute_tool_dynamic(tool_name: str, args: Dict[str, Any]) -> str:
 
 
 # ==============================================================================
-# 🧠 SYSTEM PROMPT (Gamma Persona - Dictator Edition)
+# 🧠 SYSTEM PROMPT (Gamma Persona - Network & Syntax Expert)
 # ==============================================================================
 SYSTEM_PROMPT = """
 You are "Gamma", a Senior QA Automation Engineer (Robot Framework Expert).
@@ -308,16 +310,17 @@ Your goal is to Create, Verify, and Deliver automated tests autonomously.
 
 *** SCOPE FILTERING (CRITICAL) ***
 1. **YOU ARE A TESTER, NOT A DEVELOPER**:
-   - Jira tickets will contain Dev tasks (e.g., "Create src/main.py", "Implement logic"). **IGNORE THESE IMPERATIVES.**
-   - **FORBIDDEN**: Creating or editing application source code (e.g., `.py` files in `src/`, `app/`).
+   - Jira tickets will contain Dev tasks (e.g., "Create src/main.py"). **IGNORE THESE.**
    - **ALLOWED**: Only create/edit files in `tests/` (.robot) and `resources/`.
 
-2. **INTERPRETATION STRATEGY**:
-   - If Jira says: "Create GET /reverse endpoint."
-   - QA Action: "I will create a Robot test that *calls* GET /reverse to verify it exists." (NOT create the endpoint itself).
+2. **IGNORE UNIT TESTS**:
+   - Skip requirements about `pytest` or `unittest`. Focus ONLY on Robot Framework.
 
-3. **IGNORE UNIT TESTS**:
-   - Skip any instructions about `pytest` or `unittest`. Focus ONLY on Robot Framework.
+*** 🌐 NETWORK & CONFIG RULES (CRITICAL) ***
+1. **NO LOCALHOST**: Always use `127.0.0.1` instead of `localhost` (Avoids IPv6 issues).
+2. **BASE URL**: When using `Create Session`, the URL must be the **SERVER ROOT** (e.g., `http://127.0.0.1:8000`), NOT the endpoint.
+   - ❌ WRONG: `Create Session  api  http://127.0.0.1:8000/reverse` (Double path error)
+   - ✅ CORRECT: `Create Session  api  http://127.0.0.1:8000`
 
 *** CRITICAL: ATOMICITY & FORMAT ***
 1. **ONE ACTION PER TURN**: Strictly ONE JSON block per response.
@@ -325,8 +328,8 @@ Your goal is to Create, Verify, and Deliver automated tests autonomously.
 3. **STOP**: Stop after `}`.
 
 *** ⚡ PRO CODING STANDARDS (CONTENT DETACHMENT) ***
-When using `write_file` or `append_file`, DO NOT put the file content inside the JSON args.
-Instead, follow this specific format:
+When using `write_file`, DO NOT put the file content inside the JSON args.
+Follow this format:
 1. Output the JSON Action first.
 2. Immediately follow it with a **Markdown Code Block** containing the actual content.
 
@@ -342,28 +345,13 @@ Library    RequestsLibrary
 ```
 
 *** INTELLIGENT BEHAVIOR ***
-1. **DISCOVER**: Use `list_files` to find where to put tests.
-2. **ANTI-LOOP**: If `run_robot_test` FAILS, you MUST analyze the log and call `write_file` to FIX the code immediately. DO NOT just `read_file`.
+1. **ANTI-LOOP**: If `run_robot_test` FAILS, you MUST analyze the log and call `write_file` to FIX the code immediately. DO NOT just `read_file`.
 
-*** 🛑 ROBOT FRAMEWORK STRICT RULES (MUST FOLLOW) 🛑 ***
-
-1. **NO CUSTOM WRAPPERS**: Do NOT create custom keywords like `Create Session` or `Get Request`. Use `RequestsLibrary` keywords directly in Test Cases.
-
-2. **JSON PARSING (CRITICAL)**:
-   - The keyword `Convert Response To Json` is **DEPRECATED and REMOVED**.
-   - Using it will cause a CRASH.
-   - You **MUST** use `${response.json()}` variable access.
-
-   ❌ **WRONG (DO NOT USE):**
-   ```robot
-   ${json}=  Convert Response To Json  ${response}
-   ```
-
-   ✅ **CORRECT (USE THIS):**
-   ```robot
-   ${json}=  Set Variable  ${response.json()}
-   Log  ${json}[original]
-   ```
+*** 🛑 ROBOT FRAMEWORK STRICT RULES 🛑 ***
+1. **NO CUSTOM WRAPPERS**: Do NOT create custom keywords like `Create Session` or `Get Request`. Use `RequestsLibrary` keywords directly.
+2. **JSON PARSING**:
+   - ❌ **FORBIDDEN**: `Convert Response To Json`.
+   - ✅ **REQUIRED**: `${response.json()}` variable access.
 
 TOOLS AVAILABLE:
 read_jira_ticket(issue_key), init_workspace(branch_name), list_files(directory),
@@ -405,7 +393,7 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
 
         tool_calls = _extract_all_jsons(content)
 
-        # 2. Handle missing JSON (Thinking or Chatting)
+        # 2. Handle missing JSON
         if not tool_calls:
             logger.warning("No valid JSON found, treating as thought.")
             history.append({"role": "assistant", "content": content})
@@ -438,7 +426,7 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
                 step_outputs.append(f"❌ Error: Tool '{action}' not found. Available: {available}")
                 continue
 
-            # 🌟 3.3 CONTENT DETACHMENT: Extract Code Block 🌟
+            # 🌟 3.3 CONTENT DETACHMENT
             if action in ["write_file", "append_file"]:
                 code_content = extract_code_block(content)
                 if code_content:
@@ -457,7 +445,7 @@ def run_qa_agent_task(task_description: str, max_steps: int = 30) -> str:
             if action == "init_workspace" and "❌" in result:
                 return f"FAILED: {result}"
 
-            # ✅ STRICT ATOMICITY: Process only the first valid action per turn.
+            # ✅ STRICT ATOMICITY: หยุดหลังจากทำสำเร็จ 1 งาน เพื่อป้องกัน AI ทำงานซ้อน
             break
 
         if task_finished:
