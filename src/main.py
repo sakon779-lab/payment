@@ -1,12 +1,8 @@
-
-
 from fastapi import FastAPI
+from src.utils.string_ops import hello_world
+
 app = FastAPI()
 
-
-from src.utils.string_ops import reverse_string
-
-@app.get('/reverse/{text}')
-def reverse(text: str):
-    reversed_text = reverse_string(text)
-    return {'original': text, 'reversed': reversed_text}
+@app.get('/hello/{name}')
+def read_root(name: str):
+    return {'message': hello_world(name)}

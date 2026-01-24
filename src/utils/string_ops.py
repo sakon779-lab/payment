@@ -1,2 +1,2 @@
-def reverse_string(text):
-    return text[::-1]
+def hello_world(name: str) -> str:
+    return f'Hello, {name}!'
