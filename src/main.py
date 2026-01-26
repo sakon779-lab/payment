@@ -1,10 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-def hello_world(name: str):
-    return f'Hello, {name}!'
-
 @app.get('/hello/{name}')
-def read_root(name: str):
-    return {'message': hello_world(name)}
+def greet(name: str):
+    if not name.isalpha():
+        raise HTTPException(status_code=400, detail='Name must contain only alphabets')
+    return {'message': f'Hello, {name}!'}

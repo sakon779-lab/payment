@@ -14,4 +14,4 @@ services:
       - '1080:1080'
 networks:
   default:
-    driver: bridge
+    name: app_net
