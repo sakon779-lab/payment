@@ -1,5 +1,5 @@
 from unittest import TestCase
-from src.utils.string_utils import reverse_string
+from src.utils.string_ops import reverse_string
 
 class TestStringUtils(TestCase):
     def test_reverse_string(self):
