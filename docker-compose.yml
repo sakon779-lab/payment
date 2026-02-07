@@ -1,17 +1,38 @@
+<<<<<<< HEAD
 version: '3'
+=======
+version: '3.8'
+
+>>>>>>> e424b668ad8ffac8dd5b5d31c3191b1ad8f1986a
 services:
   api:
     build: .
     ports:
       - "8000:8000"
+<<<<<<< HEAD
     depends_on:
       - mockserver
+=======
+    networks:
+      - app_net
+>>>>>>> e424b668ad8ffac8dd5b5d31c3191b1ad8f1986a
     environment:
       - MOCK_SERVER_URL=http://mockserver:1080
+    depends_on:
+      - mockserver
+  
   mockserver:
     image: mockserver/mockserver:5.15.0
     ports:
       - "1080:1080"
+<<<<<<< HEAD
 networks:
   default:
     driver: bridge
+=======
+    networks:
+      - app_net
+
+networks:
+  app_net:
+>>>>>>> e424b668ad8ffac8dd5b5d31c3191b1ad8f1986a
