@@ -3,15 +3,10 @@ services:
   api:
     build: .
     ports:
-      - '8000:8000'
-    depends_on:
-      - mockserver
+      - "80:80"
     environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+      - PYTHONUNBUFFERED=1
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: bbyars/mockserver
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "1080:1080"

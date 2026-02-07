@@ -1,15 +1,37 @@
-from fastapi import FastAPI, HTTPException
 
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import re
+class PasswordCheckRequest(BaseModel):
+    password: str
 app = FastAPI()
 
-@app.get('/hello/{name}')
-def greet(name: str):
-    if not name.isalpha():
-        raise HTTPException(status_code=400, detail='Name must contain only alphabets')
-    return {'message': f'Hello, {name}!'}
+def check_password_strength(password: str) -> dict:
+    score = 0
+    feedback = []
+    if len(password) >= 8:
+        score += 1
+    else:
+        feedback.append("Password is too short")
+    if re.search(r'[0-9]', password):
+        score += 1
+    else:
+        feedback.append("Add a number")
+    if re.search(r'[A-Z]', password):
+        score += 1
+    else:
+        feedback.append("Add an uppercase letter")
+    if re.search(r'[!@#$%^&*]', password):
+        score += 1
+    else:
+        feedback.append("Add a special character")
+    strength = "Weak" if score <= 1 else "Medium" if score <= 3 else "Strong"
+    return {"score": score, "strength": strength, "feedback": feedback}
 
-@app.get('/reverse/{text}')
-def reverse_string(text: str):
-    if not text.strip():
-        raise HTTPException(status_code=400, detail='Text cannot be empty or contain only spaces')
-    return {'original': text, 'reversed': text[::-1]}
+@app.post('/check-password')
+def check_password(request: PasswordCheckRequest):
+    password = request.password
+    if not password:
+        raise HTTPException(status_code=400, detail="Password cannot be empty")
+    result = check_password_strength(password)
+    return result
