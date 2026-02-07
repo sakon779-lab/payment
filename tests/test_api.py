@@ -2,7 +2,11 @@ from fastapi.testclient import TestClient
 from src.main import app
 test_client = TestClient(app)
 
-def test_hello_endpoint():
-    response = test_client.get('/hello/World')
+def test_check_password():
+    response = test_client.post('/check-password', json={'password': 'Test123!'})
     assert response.status_code == 200
-    assert response.json() == {'message': 'Hello, World!'}
+    assert response.json() == {
+        'score': 4,
+        'feedback': [],
+        'strength': 'Strong'
+    }

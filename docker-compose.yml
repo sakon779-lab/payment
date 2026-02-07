@@ -1,9 +1,9 @@
-version: '3.8'
+version: '3'
 services:
   api:
     build: .
     ports:
-      - '8000:8000'
+      - "8000:8000"
     depends_on:
       - mockserver
     environment:
@@ -11,7 +11,7 @@ services:
   mockserver:
     image: mockserver/mockserver:5.15.0
     ports:
-      - '1080:1080'
+      - "1080:1080"
 networks:
   default:
-    name: app_net
+    driver: bridge
