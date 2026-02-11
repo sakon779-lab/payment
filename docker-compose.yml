@@ -3,15 +3,12 @@ services:
   api:
     build: .
     ports:
-      - '8000:8000'
-    depends_on:
-      - mockserver
-    environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+      - "8000:8000"
+    volumes:
+      - .:/app
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
+
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: mockserver/mockserver:5.17.2
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "1080:1080"

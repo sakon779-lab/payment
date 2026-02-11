@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from src.main import app
+from src.main import app, PasswordRequest, evaluate_password_strength
 test_client = TestClient(app)
 def test_check_password_weak():
     response = test_client.post('/check-password', json={'password': 'pass'})
