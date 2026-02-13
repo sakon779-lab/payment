@@ -1,17 +1,19 @@
 version: '3.8'
+
 services:
   api:
     build: .
+    container_name: payment_api
     ports:
-      - '8000:8000'
+      - "80:80"
+    environment:
+      - NAME=World
     depends_on:
       - mockserver
-    environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: alpine/socat
+    command: "tcp-listen:5000,fork EXEC:/bin/cat"
+    container_name: payment_mockserver
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "5000:5000"
