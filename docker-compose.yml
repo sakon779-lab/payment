@@ -1,17 +1,18 @@
-version: '3.8'
+version: '3.9'
+
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - '8000:8000'
-    depends_on:
-      - mockserver
-    environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+      - "8000:8000"
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: alpine/socat
+    command: socat TCP-LISTEN:5000,fork EXEC:"echo 'Hello from Mock Server'"
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "5000:5000"
