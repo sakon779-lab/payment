@@ -1,17 +1,18 @@
 version: '3.8'
+
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - '8000:8000'
+      - "8000:8000"
     depends_on:
       - mockserver
     environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+      - PYTHONPATH=/app
+
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: payment_hephaestus-mockserver:latest
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "3000:3000"

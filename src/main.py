@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, field_validator
 
 app = FastAPI()
 
@@ -13,3 +14,50 @@ def reverse_string(text: str):
     if not text.strip():
         raise HTTPException(status_code=400, detail='Text cannot be empty or contain only spaces')
     return {'original': text, 'reversed': text[::-1]}
+
+class PasswordRequest(BaseModel):
+    password: str
+
+    @field_validator('password')
+    def validate_password(cls, v):
+        if not v.strip():
+            raise ValueError("Password cannot be empty")
+        return v
+
+@app.post('/check-password')
+def check_password(request: PasswordRequest):
+    password = request.password
+    score = 0
+    feedback = []
+
+    if len(password) >= 8:
+        score += 1
+    else:
+        feedback.append("Password is too short")
+
+    if any(char.isdigit() for char in password):
+        score += 1
+    else:
+        feedback.append("Add a number")
+
+    if any(char.isupper() for char in password):
+        score += 1
+    else:
+        feedback.append("Add an uppercase letter")
+
+    if any(char in "!@#$%^&*" for char in password):
+        score += 1
+    else:
+        feedback.append("Add a special character")
+
+    strength = "Weak" if score <= 1 else "Medium" if score <= 3 else "Strong"
+
+    return {
+        "score": score,
+        "strength": strength,
+        "feedback": feedback
+    }
+
+@app.get("/hello")
+def read_root():
+    return {"message": "Hello World"}
