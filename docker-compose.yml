@@ -1,17 +1,14 @@
-version: '3.8'
 services:
   api:
     build: .
     ports:
-      - '8000:8000'
+      - "8000:80"
+    volumes:
+      - .:/app
     depends_on:
       - mockserver
-    environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+
   mockserver:
     image: mockserver/mockserver:5.15.0
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "1080:1080"
