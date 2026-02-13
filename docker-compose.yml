@@ -1,17 +1,19 @@
 version: '3.8'
+
 services:
   api:
     build: .
+    container_name: password_strength_checker_api
     ports:
-      - '8000:8000'
-    depends_on:
-      - mockserver
+      - "8000:80"
+    volumes:
+      - .:/app
+    working_dir: /app
     environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+      - PYTHONPATH=/app
+
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: mockserver/mockserver:mockserver-5.14.0
+    container_name: password_strength_checker_mockserver
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "1080:1080"
