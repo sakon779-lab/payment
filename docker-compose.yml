@@ -1,17 +1,15 @@
-version: '3.8'
 services:
   api:
-    build: .
+    build:
+      context: .
+      args:
+        DOCKER_BUILDKIT: 1
     ports:
-      - '8000:8000'
-    depends_on:
-      - mockserver
-    environment:
-      - MOCK_SERVER_URL=http://mockserver:1080
+      - "8000:80"
+    volumes:
+      - .:/app
+
   mockserver:
-    image: mockserver/mockserver:5.15.0
+    image: mockserver/mockserver:5.14.0
     ports:
-      - '1080:1080'
-networks:
-  default:
-    name: app_net
+      - "1080:1080"
