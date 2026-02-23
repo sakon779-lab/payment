@@ -2,17 +2,17 @@ version: '3.9'
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - .:/app
     ports:
       - "8000:8000"
-    volumes:
-      - ./src:/app/src
-      - ./tests:/app/tests
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
 
   mockserver:
-    image: alpine/socat
-    command: socat TCP-LISTEN:5000,fork EXEC:"echo 'Hello from Mock Server'"
+    image: mockserver/mockserver:5.14.0
     ports:
-      - "5000:5000"
+      - "1080:1080"

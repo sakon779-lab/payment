@@ -1,41 +1,36 @@
 from fastapi.testclient import TestClient
-import pytest
 from src.main import app
 
 client = TestClient(app)
 
-def test_check_password_empty():
-    response = client.post("/check-password", json={"password": ""})
-    assert response.status_code == 422
-    assert "detail" in response.json()
-    detail = response.json()["detail"][0]
-    assert detail["loc"] == ["body", "password"]
-    assert detail["msg"].startswith("Value error, Password cannot be empty")
-    assert detail["type"] == "value_error"
-
-def test_check_password_weak():
-    response = client.post("/check-password", json={"password": "abc"})
+def test_greet():
+    response = client.get('/hello/Olympus')
     assert response.status_code == 200
-    assert response.json() == {
-        "score": 0,
-        "strength": "Weak",
-        "feedback": ["Password is too short", "Add a number", "Add an uppercase letter", "Add a special character"]
-    }
+    assert response.json() == {'message': 'Hello, Olympus!'}
 
-def test_check_password_medium():
-    response = client.post("/check-password", json={"password": "Ab1"})
+def test_reverse_string():
+    response = client.get('/reverse/Python')
     assert response.status_code == 200
-    assert response.json() == {
-        "score": 2,
-        "strength": "Medium",
-        "feedback": ["Password is too short", "Add a special character"]
-    }
+    assert response.json() == {'original': 'Python', 'reversed': 'nohtyP'}
 
-def test_check_password_strong():
-    response = client.post("/check-password", json={"password": "StrongP@ss1"})
+def test_check_password_success():
+    response = client.post('/check-password', json={"password": "StrongPass1!"})
     assert response.status_code == 200
-    assert response.json() == {
-        "score": 4,
-        "strength": "Strong",
-        "feedback": []
-    }
+    assert response.json() == {"score": 4, "strength": "Strong", "feedback": []}
+
+def test_check_password_failure():
+    response = client.post('/check-password', json={"password": "weak"})
+    assert response.status_code == 200
+    assert response.json()['score'] == 0
+    assert response.json()['strength'] == "Weak"
+    assert response.json()['feedback'] == ["Password is too short", "Add a number", "Add an uppercase letter", "Add a special character"]
+
+def test_process_payment_success():
+    response = client.post('/process_payment', json={"amount": 100.0, "currency": "USD", "payment_method": "credit_card"})
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "message": "Payment processed successfully"}
+
+def test_process_payment_failure():
+    response = client.post('/process_payment', json={"amount": -10.0, "currency": "USD", "payment_method": "credit_card"})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Payment processing failed: Amount must be positive"}

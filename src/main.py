@@ -58,3 +58,18 @@ def check_password(request: PasswordRequest):
         "strength": strength,
         "feedback": feedback
     }
+
+class PaymentRequest(BaseModel):
+    amount: float
+    currency: str
+    payment_method: str
+
+@app.post('/process_payment')
+def process_payment(request: PaymentRequest):
+    if request.amount <= 0:
+        raise HTTPException(status_code=400, detail="Payment processing failed: Amount must be positive")
+    
+    return {
+        "status": "success",
+        "message": "Payment processed successfully"
+    }
