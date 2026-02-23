@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, field_validator
 import re
 
 app = FastAPI()
@@ -7,11 +7,15 @@ app = FastAPI()
 class PasswordRequest(BaseModel):
     password: str
 
-    @validator('password')
+    @field_validator('password')
     def password_empty(cls, v):
         if not v.strip():
             raise ValueError("Password cannot be empty")
         return v
+
+class DiscountRequest(BaseModel):
+    total_amount: float
+    customer_type: str
 
 @app.get('/hello/{name}')
 def greet(name: str):
@@ -58,3 +62,20 @@ def check_password(request: PasswordRequest):
         "strength": strength,
         "feedback": feedback
     }
+
+@app.post('/calculate_discount')
+def calculate_discount(request: DiscountRequest):
+    total_amount = request.total_amount
+    customer_type = request.customer_type.lower()
+
+    if customer_type == 'regular':
+        discount = 0.0
+    elif customer_type == 'member':
+        discount = 0.10
+    elif customer_type == 'vip':
+        discount = 0.20
+    else:
+        raise HTTPException(status_code=400, detail="Invalid customer type")
+
+    discounted_price = total_amount * (1 - discount)
+    return {"discounted_price": discounted_price}
