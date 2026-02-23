@@ -12,7 +12,6 @@ services:
       - ./tests:/app/tests
 
   mockserver:
-    image: alpine/socat
-    command: socat TCP-LISTEN:5000,fork EXEC:"echo 'Hello from Mock Server'"
+    image: mockserver/mockserver:5.14.0
     ports:
-      - "5000:5000"
+      - "5000:1080"
