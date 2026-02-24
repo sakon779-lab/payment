@@ -1,0 +1,64 @@
+# SCRUM-30: Implement Order Checkout API with External Payment Gateway
+
+## API Endpoint
+- **Method**: POST
+- **Path**: `/api/v1/checkout`
+
+## Request Payload (JSON)
+```json
+{
+  "user_id": 999,
+  "product_id": "PROD-01",
+  "amount": 1500.00
+}
+```
+
+## Input Validation Rules & Error Messages
+
+### user_id
+- **Required**: Must be a positive integer (> 0)
+- **Error if missing**: `{"detail": "user_id is required"}`
+- **Error if <= 0**: `{"detail": "user_id must be a positive integer"}`
+
+### product_id
+- **Required**: Must be a string and cannot be empty or null
+- **Error if missing**: `{"detail": "product_id is required"}`
+- **Error if empty/null**: `{"detail": "product_id cannot be empty"}`
+
+### amount
+- **Required**: Must be a decimal number strictly greater than 0
+- **Error if missing**: `{"detail": "amount is required"}`
+- **Error if <= 0**: `{"detail": "amount must be strictly greater than 0"}`
+
+## Database Information
+- **Connection**: DB_HOST=127.0.0.1, DB_PORT=5434, DB_NAME=shop_db, DB_USER=postgres, DB_PASS=secretpassword
+- **Table `users`**: Needs an active user to proceed
+- **Table `orders`**: The API will insert a record here upon successful payment
+
+## Mock Server Information
+- **URL**: http://127.0.0.1:1080
+- **API to Mock**: POST /external/payment/charge
+- **Success Response**: HTTP 200 with `{"status": "SUCCESS", "txn_id": "mock_txn_888"}`
+- **Failed Response**: HTTP 400 with `{"status": "DECLINED", "reason": "Insufficient Funds"}`
+
+## Acceptance Criteria
+
+### AC1 - Successful Checkout (Happy Path)
+- Given a valid user exists in the database
+- And the Mock Payment Gateway is set up to return 200 OK (SUCCESS)
+- When calling POST /api/v1/checkout with valid payload
+- Then the API should return 201 Created
+- And the response JSON should contain `{"order_status": "COMPLETED"}`
+
+### AC2 - Payment Declined
+- Given a valid user exists in the database
+- And the Mock Payment Gateway is set up to return 400 Bad Request (DECLINED)
+- When calling POST /api/v1/checkout
+- Then the API should return 402 Payment Required
+- And the response JSON should contain `{"error": "Payment Declined"}`
+
+### AC3 - User Not Found
+- Given a user_id does NOT exist in the database
+- When calling POST /api/v1/checkout
+- Then the API should return 404 Not Found
+- And the response JSON should contain `{"detail": "User not found"}`
