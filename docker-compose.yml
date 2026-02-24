@@ -1,17 +1,44 @@
-version: '3.9'
+version: '3.8'
 
 services:
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
       - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:secretpassword@db:5432/shop_db
+      - PAYMENT_GATEWAY_URL=http://mockserver:1080/external/payment/charge
+    depends_on:
+      - db
+      - mockserver
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
 
+  db:
+    image: postgres:13
+    environment:
+      - POSTGRES_DB=shop_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=secretpassword
+    ports:
+      - "5434:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   mockserver:
     image: mockserver/mockserver:5.14.0
     ports:
-      - "5000:1080"
+      - "1080:1080"
+    environment:
+      - MOCKSERVER_INITIALIZATION_JSON_PATH=/config
+    volumes:
+      - ./mockserver-initialization.json:/config
+
+volumes:
+  db_data:

@@ -1,0 +1,22 @@
+[
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/external/payment/charge"
+    },
+    "httpResponse": {
+      "statusCode": 200,
+      "body": "{\"status\": \"SUCCESS\", \"txn_id\": \"mock_txn_888\"}"
+    }
+  },
+  {
+    "httpRequest": {
+      "method": "POST",
+      "path": "/external/payment/charge"
+    },
+    "httpResponse": {
+      "statusCode": 400,
+      "body": "{\"status\": \"DECLINED\", \"reason\": \"Insufficient Funds\"}"
+    }
+  }
+]
