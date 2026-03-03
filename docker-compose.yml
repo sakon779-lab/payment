@@ -10,8 +10,36 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
+    environment:
+      # ชี้ Database URL ไปหา Service 'db' ภายใน Docker Network
+      - DATABASE_URL=postgresql://postgres:secretpassword@db:5432/shop_db
+    depends_on:
+      - db
+      - mockserver
+
+  db:
+    image: postgres:13-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: shop_db
+    ports:
+      # ผูกพอร์ต 5434 (เครื่องคุณ) เข้ากับ 5432 (ใน Docker) เพื่อให้ตรงกับโค้ดเทส
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   mockserver:
     image: mockserver/mockserver:5.14.0
     ports:
-      - "5000:1080"
+      # ปรับกลับมาเป็น 1080 เพื่อให้ตรงกับที่ระบุไว้ใน Spec
+      - "1080:1080"
+    environment:
+      # บอกให้ Mockserver โหลดค่าคอนฟิกตอนเปิดเครื่อง
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /config/mockserver-initialization.json
+    volumes:
+      # Mount ไฟล์ JSON สำหรับจำลอง API เข้าไปในคอนเทนเนอร์
+      - ./mockserver-initialization.json:/config/mockserver-initialization.json
+
+volumes:
+  postgres_data:

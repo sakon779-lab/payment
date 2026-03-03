@@ -1,23 +1,70 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request  
+from starlette.middleware.base import BaseHTTPMiddleware      
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 import httpx
 import os
 import re
+import contextvars
 
 # Database setup
-SQLALCHEMY_DATABASE_URL = "postgresql://postgres:secretpassword@127.0.0.1:5434/shop_db"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:secretpassword@db:5432/shop_db")
+
+x_test_id_ctx = contextvars.ContextVar("x_test_id", default=None)
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 Base = declarative_base()
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # FastAPI app
 app = FastAPI()
+
+class TestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # ดึงค่า X-Test-Id จาก Header ถ้ามี
+        test_id = request.headers.get("X-Test-Id")
+        # เซ็ตลง Global Context
+        x_test_id_ctx.set(test_id)
+        
+        # ปล่อย Request ให้ทำงานต่อไป
+        response = await call_next(request)
+        return response
+
+
+app.add_middleware(TestIdMiddleware)
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # ดึง Error ตัวแรกสุดที่เจอมาจัดการ
+    error = exc.errors()[0]
+    field_name = error.get("loc")[-1]  # ชื่อฟิลด์ที่มีปัญหา เช่น 'amount', 'product_id'
+    error_type = error.get("type")
+    error_msg = error.get("msg")
+
+    # แปลงข้อความให้ตรงกับ Spec
+    if error_type == "missing":
+        custom_msg = f"{field_name} is required"
+    else:
+        # กรณีผิดเงื่อนไข @field_validator (Pydantic V2 จะชอบมีคำว่า "Value error, " นำหน้า เราก็ตัดออก)
+        custom_msg = error_msg.replace("Value error, ", "")
+
+    # บังคับตอบ 400 Bad Request พร้อม Format JSON เป๊ะๆ ตาม Spec
+    return JSONResponse(
+        status_code=400,
+        content={"detail": custom_msg}
+    )
+
+def get_forward_headers():
+    test_id = x_test_id_ctx.get()
+    return {"X-Test-Id": test_id} if test_id else {}
 
 # Database models
 class User(Base):
@@ -33,6 +80,8 @@ class Order(Base):
     amount = Column(Float, nullable=False)
     status = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+Base.metadata.create_all(bind=engine)
 
 # Dependency
 def get_db():
@@ -76,7 +125,7 @@ class PaymentErrorResponse(BaseModel):
     error: str
 
 # API endpoints
-@app.post("/api/v1/checkout", response_model=CheckoutResponse)
+@app.post("/api/v1/checkout", response_model=CheckoutResponse, status_code=201)
 async def checkout(request: CheckoutRequest, db: Session = Depends(get_db)):
     # Check if user exists
     user = db.query(User).filter(User.id == request.user_id).first()
@@ -84,7 +133,7 @@ async def checkout(request: CheckoutRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found")
 
     # Call external payment gateway
-    payment_url = "http://127.0.0.1:1080/external/payment/charge"
+    payment_url = "http://mockserver:1080/external/payment/charge"
     async with httpx.AsyncClient() as client:
         payment_response = await client.post(
             payment_url,
@@ -92,7 +141,8 @@ async def checkout(request: CheckoutRequest, db: Session = Depends(get_db)):
                 "user_id": request.user_id,
                 "product_id": request.product_id,
                 "amount": request.amount
-            }
+            },
+            headers=get_forward_headers()
         )
 
     if payment_response.status_code == 200:
