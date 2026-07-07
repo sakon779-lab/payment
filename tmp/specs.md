@@ -1,65 +1,36 @@
-# SCRUM-30: Implement Order Checkout API with External Payment Gateway
+# SCRUM-29 Password Validation Specification
 
-## Summary
-As a registered user, I want to submit my order through the Checkout API so that the system can process my payment via a 3rd-party Payment Gateway and record my order in the database.
+## Overview
+This specification defines the behavior of the `/check-password` endpoint's validation logic, particularly for handling None and missing password fields.
 
-## Technical Specifications
-- API Endpoint: POST /api/v1/checkout
-- Request Payload (JSON):
-```json
-{
-  "user_id": 999,
-  "product_id": "PROD-01",
-  "amount": 1500.00
-}
-```
+## Requirements
 
-## Input Validation Rules & Exact Error Messages
-If any validation fails, the API MUST return 400 Bad Request with the exact JSON structure: {"detail": "<Exact_Error_Message>"}.
+### 1. Valid Password (200 OK)
+- A valid non-empty string should return HTTP 200 with the password strength calculation
 
-### user_id
-- Required. Must be a positive integer (> 0).
-  - Error if missing: {"detail": "user_id is required"}
-  - Error if <= 0: {"detail": "user_id must be a positive integer"}
+### 2. Invalid Password Cases (400 Bad Request)
 
-### product_id
-- Required. Must be a string and cannot be empty or None.
-  - Error if missing: {"detail": "product_id is required"}
-  - Error if empty/None: {"detail": "product_id cannot be empty"}
+#### Case 1: Null Password
+- Input: `{"password": None}`
+- Expected: HTTP 400 with `"detail": "Password is required"`
 
-### amount
-- Required. Must be a decimal number strictly greater than 0.
-  - Error if missing: {"detail": "amount is required"}
-  - Error if <= 0: {"detail": "amount must be strictly greater than 0"}
+#### Case 2: Missing Password Field
+- Input: `{}`
+- Expected: HTTP 400 with `"detail": "Password is required"`
 
-## Database Information (PostgreSQL)
-- Connection: DB_HOST=127.0.0.1, DB_PORT=5434, DB_NAME=shop_db, DB_USER=postgres, DB_PASS=secretpassword
-- Table users: Needs an active user to proceed. (Setup Example: INSERT INTO users (id, status) VALUES (<dynamic_id>, 'ACTIVE');)
-- Table orders: The API will insert a record here upon successful payment.
+#### Case 3: Empty or Whitespace-only Password
+- Input: `{"password": ""}` or `{"password": "   "}`
+- Expected: HTTP 400 with `"detail": "Password cannot be empty"`
 
-## Mock Server Information (External Dependency)
-- Mock Server URL: http://127.0.0.1:1080
-- External API to Mock: POST /external/payment/charge
-- Expected Mock Response (Success): HTTP 200 {"status": "SUCCESS", "txn_id": "mock_txn_888"}
-- Expected Mock Response (Failed): HTTP 400 {"status": "DECLINED", "reason": "Insufficient Funds"}
+## Implementation Notes
 
-## Acceptance Criteria (AC)
-### AC1 - Successful Checkout (Happy Path)
-- Given a valid user exists in the database.
-- And the Mock Payment Gateway is set up to return 200 OK (SUCCESS).
-- When calling POST /api/v1/checkout with valid payload.
-- Then the API should return 201 Created.
-- And the response JSON should contain {"order_status": "COMPLETED"}.
+### Error Handling
+- Pydantic v2 reports error type "string_type" for a None value on a str field
+- Pydantic v2 reports error type "missing" for an absent field
+- Both cases must return "Password is required" with a capital P
 
-### AC2 - Payment Declined
-- Given a valid user exists in the database.
-- And the Mock Payment Gateway is set up to return 400 Bad Request (DECLINED).
-- When calling POST /api/v1/checkout.
-- Then the API should return 402 Payment Required.
-- And the response JSON should contain {"error": "Payment Declined"}.
+### Current Code Status
+The existing `@app.exception_handler(RequestValidationError)` in `src/main.py` already handles None values correctly by returning 400, but we need to ensure both None and missing field cases return the same error message "Password is required" instead of the default Pydantic messages.
 
-### AC3 - User Not Found
-- Given a user_id does NOT exist in the database.
-- When calling POST /api/v1/checkout.
-- Then the API should return 404 Not Found.
-- And the response JSON should contain {"detail": "User not found"}.
+### Test Coverage
+The test file `tests/test_password_validation.py` must cover all the above cases.
