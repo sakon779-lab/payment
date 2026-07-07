@@ -51,7 +51,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
     # แปลงข้อความให้ตรงกับ Spec
     if error_type == "missing":
-        custom_msg = f"{field_name} is required"
+        custom_msg = "Password is required"
+    elif error_type == "string_type" and field_name == "password":
+        # Handle null password value (string_type) - this is what we need to fix
+        custom_msg = "Password is required"
     else:
         # กรณีผิดเงื่อนไข @field_validator (Pydantic V2 จะชอบมีคำว่า "Value error, " นำหน้า เราก็ตัดออก)
         custom_msg = error_msg.replace("Value error, ", "")
