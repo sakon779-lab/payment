@@ -1,36 +1,32 @@
-# SCRUM-29 Password Validation Specification
+# SCRUM-29: Fix Password Validation
 
-## Overview
-This specification defines the behavior of the `/check-password` endpoint's validation logic, particularly for handling None and missing password fields.
+## Problem
+The previous implementation of the global RequestValidationError handler changed the shared "if error_type == missing" branch to always return "Password is required", which broke other endpoints that rely on the original behavior.
 
 ## Requirements
+1. Only the password field should return "Password is required" for missing/None values
+2. Other fields (user_id, product_id, amount) should continue to return "{field} is required" messages
+3. Empty/whitespace passwords should return "Password cannot be empty"
+4. Valid passwords should return 200 with score/strength/feedback
 
-### 1. Valid Password (200 OK)
-- A valid non-empty string should return HTTP 200 with the password strength calculation
+## Solution
+Modify the exception handler in src/main.py to scope the change to the password field only:
 
-### 2. Invalid Password Cases (400 Bad Request)
+```python
+if field_name == "password" and error_type in ("missing", "string_type"):
+    custom_msg = "Password is required"
+elif error_type == "missing":
+    custom_msg = f"{field_name} is required"   # UNCHANGED for other fields
+else:
+    custom_msg = error_msg.replace("Value error, ", "")
+```
 
-#### Case 1: Null Password
-- Input: `{"password": None}`
-- Expected: HTTP 400 with `"detail": "Password is required"`
-
-#### Case 2: Missing Password Field
-- Input: `{}`
-- Expected: HTTP 400 with `"detail": "Password is required"`
-
-#### Case 3: Empty or Whitespace-only Password
-- Input: `{"password": ""}` or `{"password": "   "}`
-- Expected: HTTP 400 with `"detail": "Password cannot be empty"`
-
-## Implementation Notes
-
-### Error Handling
-- Pydantic v2 reports error type "string_type" for a None value on a str field
-- Pydantic v2 reports error type "missing" for an absent field
-- Both cases must return "Password is required" with a capital P
-
-### Current Code Status
-The existing `@app.exception_handler(RequestValidationError)` in `src/main.py` already handles None values correctly by returning 400, but we need to ensure both None and missing field cases return the same error message "Password is required" instead of the default Pydantic messages.
-
-### Test Coverage
-The test file `tests/test_password_validation.py` must cover all the above cases.
+## Test Cases
+- POST /check-password with None password → 400 "Password is required"
+- POST /check-password with missing password field → 400 "Password is required"
+- POST /check-password with empty password → 400 "Password cannot be empty"
+- POST /check-password with whitespace-only password → 400 "Password cannot be empty"
+- POST /check-password with valid password → 200 with score/strength/feedback
+- POST /api/v1/checkout with missing user_id → 400 "user_id is required" (unchanged)
+- POST /api/v1/checkout with missing product_id → 400 "product_id is required" (unchanged)
+- POST /api/v1/checkout with missing amount → 400 "amount is required" (unchanged)
