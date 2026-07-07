@@ -24,8 +24,10 @@ services:
       POSTGRES_PASSWORD: secretpassword
       POSTGRES_DB: shop_db
     ports:
-      # ผูกพอร์ต 5434 (เครื่องคุณ) เข้ากับ 5432 (ใน Docker) เพื่อให้ตรงกับโค้ดเทส
-      - "5434:5432"
+      # ผูกพอร์ต 5435 (เครื่องคุณ) เข้ากับ 5432 (ใน Docker) เพื่อให้ตรงกับโค้ดเทส
+      # (เดิมใช้ 5434 แต่ชนกับ native PostgreSQL service บน Windows — connection ถูก
+      #  native แย่งไปทำให้ auth fail ทั้งที่รหัสถูก)
+      - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
