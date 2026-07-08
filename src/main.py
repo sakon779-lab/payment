@@ -50,7 +50,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     error_msg = error.get("msg")
 
     # แปลงข้อความให้ตรงกับ Spec
-    if error_type == "missing":
+    # SCRUM-29: password ที่เป็น null (Pydantic v2 = "string_type") หรือ missing → "Password is required"
+    # scope เฉพาะ field 'password' เพื่อไม่ให้กระทบ field อื่น (เช่น checkout user_id/product_id/amount)
+    if field_name == "password" and error_type in ("missing", "string_type"):
+        custom_msg = "Password is required"
+    elif error_type == "missing":
         custom_msg = f"{field_name} is required"
     else:
         # กรณีผิดเงื่อนไข @field_validator (Pydantic V2 จะชอบมีคำว่า "Value error, " นำหน้า เราก็ตัดออก)
