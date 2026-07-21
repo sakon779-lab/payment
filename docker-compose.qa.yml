@@ -1,0 +1,46 @@
+version: '3.9'
+
+# QA environment — owned by the Hermes (Deploy) agent, isolated from the dev stack.
+# Dev stack (docker-compose.yml) stays on 8000/5435/1080 and is bind-mounted to
+# Hephaestus's workspace. This QA stack runs on 8001/5436/1081 from Hermes's own
+# workspace (a clone of merged main), so "what's deployed" is decoupled from "what's
+# being edited". Bring up with a distinct project name:
+#   docker compose -p payment_qa -f docker-compose.qa.yml up -d --build
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    environment:
+      - DATABASE_URL=postgresql://postgres:secretpassword@db:5432/shop_db
+    depends_on:
+      - db
+      - mockserver
+
+  db:
+    image: postgres:13-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: shop_db
+    ports:
+      - "5436:5432"
+    volumes:
+      - postgres_data_qa:/var/lib/postgresql/data
+
+  mockserver:
+    image: mockserver/mockserver:5.14.0
+    ports:
+      - "1081:1080"
+    environment:
+      MOCKSERVER_INITIALIZATION_JSON_PATH: /config/mockserver-initialization.json
+    volumes:
+      - ./mockserver-initialization.json:/config/mockserver-initialization.json
+
+volumes:
+  postgres_data_qa:
