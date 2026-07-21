@@ -19,8 +19,10 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:secretpassword@db:5432/shop_db
     depends_on:
-      - db
-      - mockserver
+      db:
+        condition: service_healthy   # wait until postgres ACCEPTS connections, not just starts
+      mockserver:
+        condition: service_started
 
   db:
     image: postgres:13-alpine
@@ -32,6 +34,11 @@ services:
       - "5436:5432"
     volumes:
       - postgres_data_qa:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d shop_db"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
 
   mockserver:
     image: mockserver/mockserver:5.14.0
