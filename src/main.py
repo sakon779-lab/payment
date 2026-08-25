@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from datetime import datetime
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -15,6 +16,12 @@ import contextvars
 
 # Database setup
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:secretpassword@db:5432/shop_db")
+
+url = SQLALCHEMY_DATABASE_URL
+if url.startswith("sqlite"):
+    engine = create_engine(url, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+else:
+    engine = create_engine(url)
 
 x_test_id_ctx = contextvars.ContextVar("x_test_id", default=None)
 
@@ -223,3 +230,11 @@ def check_password(request: PasswordRequest):
         "strength": strength,
         "feedback": feedback
     }
+# Register loyalty router
+from src.routers.loyalty import router as loyalty_router
+app.include_router(loyalty_router)
+# Override engine with StaticPool for SQLite in-memory testing
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
+# Re-create tables on the StaticPool engine for SQLite in-memory testing
+Base.metadata.create_all(bind=engine)
