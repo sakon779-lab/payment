@@ -3,6 +3,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -18,7 +19,7 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:secre
 
 x_test_id_ctx = contextvars.ContextVar("x_test_id", default=None)
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool) if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else create_engine(SQLALCHEMY_DATABASE_URL)
 
 Base = declarative_base()
 
@@ -223,3 +224,5 @@ def check_password(request: PasswordRequest):
         "strength": strength,
         "feedback": feedback
     }
+from src.routers import loyalty
+app.include_router(loyalty.router)
