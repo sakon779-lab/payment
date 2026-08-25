@@ -1,10 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends, Request  
 from starlette.middleware.base import BaseHTTPMiddleware      
 from pydantic import BaseModel, field_validator
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from datetime import datetime
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -12,13 +12,14 @@ import httpx
 import os
 import re
 import contextvars
+# loyalty router imported at bottom to avoid circular import
 
 # Database setup
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:secretpassword@db:5432/shop_db")
 
 x_test_id_ctx = contextvars.ContextVar("x_test_id", default=None)
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool) if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else create_engine(SQLALCHEMY_DATABASE_URL)
 
 Base = declarative_base()
 
@@ -39,7 +40,7 @@ class TestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app.add_middleware(TestIdMiddleware)
+# (router registered at bottom)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -223,3 +224,5 @@ def check_password(request: PasswordRequest):
         "strength": strength,
         "feedback": feedback
     }
+from src.routers import loyalty
+app.include_router(loyalty.router)
