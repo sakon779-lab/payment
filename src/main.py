@@ -2,7 +2,8 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from starlette.middleware.base import BaseHTTPMiddleware      
 from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, func
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -18,7 +19,11 @@ SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:secre
 
 x_test_id_ctx = contextvars.ContextVar("x_test_id", default=None)
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+) if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else create_engine(SQLALCHEMY_DATABASE_URL)
 
 Base = declarative_base()
 
@@ -222,4 +227,61 @@ def check_password(request: PasswordRequest):
         "score": score,
         "strength": strength,
         "feedback": feedback
+    }
+
+# Loyalty endpoint
+def rules_code(total_spend):
+    """Pure function: compute loyalty tier from total_spend (THB)."""
+    ts = round(float(total_spend), 2)
+
+    tiers = [  # (name, lower_bound_inclusive, cashback_percent)
+        ("Bronze",   0,     0),
+        ("Silver",   5000,  1),
+        ("Gold",     20000, 2),
+        ("Platinum", 50000, 5),
+    ]
+
+    def money(x):  # round to 2 decimals; keep whole numbers as ints
+        x = round(x, 2)
+        return int(x) if x == int(x) else x
+
+    idx = 0
+    for i, (_name, lb, _cb) in enumerate(tiers):
+        if ts >= lb:
+            idx = i
+    name, _lb, cb = tiers[idx]
+
+    if name == "Platinum":  # top tier: nothing left to reach
+        return {"tier": name, "cashback_percent": cb, "next_tier": None, "spend_to_next_tier": 0}
+
+    nxt_name, nxt_lb, _nxt_cb = tiers[idx + 1]
+    return {"tier": name, "cashback_percent": cb, "next_tier": nxt_name,
+            "spend_to_next_tier": money(nxt_lb - ts)}
+
+
+@app.get("/api/v1/users/{user_id}/loyalty")
+def get_loyalty(user_id: int, db: Session = Depends(get_db)):
+    # Check if user exists
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Compute total_spend from COMPLETED orders only
+    total_spend = db.query(func.coalesce(func.sum(Order.amount), 0.0)).filter(
+        Order.user_id == user_id,
+        Order.status == "COMPLETED"
+    ).scalar()
+
+    total_spend = round(float(total_spend), 2)
+
+    # Apply tier rules
+    result = rules_code(total_spend)
+
+    return {
+        "user_id": user_id,
+        "total_spend": total_spend,
+        "tier": result["tier"],
+        "cashback_percent": result["cashback_percent"],
+        "next_tier": result["next_tier"],
+        "spend_to_next_tier": result["spend_to_next_tier"],
     }
