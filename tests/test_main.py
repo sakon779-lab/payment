@@ -5,13 +5,13 @@ from src.main import app
 client = TestClient(app)
 
 def test_check_password_empty():
+    # src/main.py's RequestValidationError handler (6a197f7) replaces FastAPI's
+    # default 422 envelope with a flat 400 + {"detail": ...}. Status and message
+    # are SCRUM-29's error contract, asserted verbatim the same way
+    # qa-automation-repo/tests/payment_service/SCRUM-29.robot asserts them.
     response = client.post("/check-password", json={"password": ""})
-    assert response.status_code == 422
-    assert "detail" in response.json()
-    detail = response.json()["detail"][0]
-    assert detail["loc"] == ["body", "password"]
-    assert detail["msg"].startswith("Value error, Password cannot be empty")
-    assert detail["type"] == "value_error"
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Password cannot be empty"}
 
 def test_check_password_weak():
     response = client.post("/check-password", json={"password": "abc"})
