@@ -83,6 +83,9 @@ class Order(Base):
     status = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+# Import models so their tables register on Base.metadata before create_all runs.
+import src.models  # noqa: E402,F401
+
 Base.metadata.create_all(bind=engine)
 
 # Dependency
@@ -224,3 +227,6 @@ def check_password(request: PasswordRequest):
 from src.routers import loyalty
 
 app.include_router(loyalty.router)
+from src.routers import payments
+
+app.include_router(payments.router)
