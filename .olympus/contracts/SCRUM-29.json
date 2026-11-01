@@ -1,0 +1,97 @@
+{
+  "ticket": "SCRUM-29",
+  "summary": "Implement Password Strength Checker API",
+  "endpoints": [
+    {
+      "method": "POST",
+      "path": "/check-password"
+    }
+  ],
+  "request": {
+    "password": "string (required)"
+  },
+  "success": {
+    "status": 200,
+    "body": {
+      "score": "int 0-4",
+      "strength": "Weak|Medium|Strong",
+      "feedback": "[string]"
+    }
+  },
+  "error_contract": [
+    {
+      "condition": "password missing or null",
+      "status": 400,
+      "body": {
+        "detail": "Password is required"
+      }
+    },
+    {
+      "condition": "password empty string or whitespace-only",
+      "status": 400,
+      "body": {
+        "detail": "Password cannot be empty"
+      }
+    }
+  ],
+  "business_rules": [
+    "Start at Score = 0. Max Score = 4 (Additive only).",
+    "Length >= 8 chars → (+1 point). Else: feedback 'Password is too short'.",
+    "Contains digit (0-9) → (+1 point). Else: feedback 'Add a number'.",
+    "Contains uppercase (A-Z) → (+1 point). Else: feedback 'Add an uppercase letter'.",
+    "Contains special char (!@#$%^&*) → (+1 point). Else: feedback 'Add a special character'.",
+    "Score 0-1: strength: 'Weak'",
+    "Score 2-3: strength: 'Medium'",
+    "Score 4: strength: 'Strong'"
+  ],
+  "edge_cases": [
+    "password length exactly 8",
+    "password empty string",
+    "password whitespace-only",
+    "password with special characters and digits",
+    "password without any uppercase letters"
+  ],
+  "worked_examples": [
+    {
+      "input": {
+        "password": "StrongP@ss1"
+      },
+      "expected": {
+        "score": 4,
+        "strength": "Strong",
+        "feedback": []
+      }
+    },
+    {
+      "input": {
+        "password": "Abc123"
+      },
+      "expected": {
+        "score": 2,
+        "strength": "Medium",
+        "feedback": [
+          "Password is too short",
+          "Add a special character"
+        ]
+      }
+    },
+    {
+      "input": {
+        "password": ""
+      },
+      "expected": {
+        "status": 400,
+        "body": {
+          "detail": "Password cannot be empty"
+        }
+      }
+    }
+  ],
+  "rules_code": "import re\ndef expected(payload):\n    pw = payload.get('password')\n    if pw is None or str(pw).strip() == '':\n        return None\n    checks = [\n        (len(pw) >= 8, 'Password is too short'),\n        (bool(re.search(r'\\d', pw)), 'Add a number'),\n        (bool(re.search(r'[A-Z]', pw)), 'Add an uppercase letter'),\n        (bool(re.search(r'[!@#$%^&*]', pw)), 'Add a special character')\n    ]\n    score = sum(ok for ok, _ in checks)\n    strength = 'Weak' if score <= 1 else 'Medium' if score <= 3 else 'Strong'\n    feedback = [m for ok, m in checks if not ok]\n    return {'score': score, 'strength': strength, 'feedback': feedback}",
+  "files_to_touch": [
+    "src/main.py"
+  ],
+  "out_of_scope": [
+    "the shared RequestValidationError handler used by /checkout must keep its own messages"
+  ]
+}
